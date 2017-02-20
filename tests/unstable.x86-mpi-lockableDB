@@ -1,0 +1,5 @@
+# This test pass/fail depending on memory model (fail for now).
+edtForkBomb.c
+testEdtDestroy0.c
+guidlabel.c
+dbNoAcquire0.c
