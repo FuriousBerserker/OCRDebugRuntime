@@ -30,3 +30,4 @@
 
 # Executable and Library Folder
 install/
+build/
