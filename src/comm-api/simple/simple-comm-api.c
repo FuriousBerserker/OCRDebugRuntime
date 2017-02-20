@@ -51,8 +51,14 @@ static ocrPolicyMsg_t * allocateNewMessage(ocrCommApi_t * self, u32 size) {
     return message;
 }
 
+u8 simpleCommApiInitHandle(ocrCommApi_t *self, ocrMsgHandle_t *handle) {
+    ASSERT(0);
+    return OCR_ENOTSUP;
+}
+
 u8 sendMessageSimpleCommApi(ocrCommApi_t *self, ocrLocation_t target, ocrPolicyMsg_t *message,
                         ocrMsgHandle_t **handle, u32 properties) {
+    START_PROFILE(commapi_sendMessageSimpleCommApi);
     ocrCommApiSimple_t * commApiSimple = (ocrCommApiSimple_t *) self;
 
     // Debug and check if we should push this in the in/out patch or runlevel
@@ -97,8 +103,7 @@ u8 sendMessageSimpleCommApi(ocrCommApi_t *self, ocrLocation_t target, ocrPolicyM
         // Assert for now since we don't really handle errors in upper-layers
         ASSERT(ret == 0);
     }
-
-    return ret;
+    RETURN_PROFILE(ret);
 }
 
 /*
@@ -106,6 +111,7 @@ u8 sendMessageSimpleCommApi(ocrCommApi_t *self, ocrLocation_t target, ocrPolicyM
  *
  */
 u8 pollMessageSimpleCommApi(ocrCommApi_t *self, ocrMsgHandle_t **handle) {
+    START_PROFILE(commapi_pollMessageSimpleCommApi);
     //BUG #130 Is there a use case to poll for a one-way to complete ?
     //This implementation does not support one-way with ack
     //However it's a little hard to detect here. A handle message
@@ -137,23 +143,24 @@ u8 pollMessageSimpleCommApi(ocrCommApi_t *self, ocrMsgHandle_t **handle) {
                 *handle = createMsgHandler(self, msg);
                 (*handle)->properties = ASYNC_MSG_PROP;
             } else {
-                bool found = hashtableNonConcRemove(commApiSimple->handleMap, (void *) msg->msgId, (void **)handle);
-                ASSERT(found && (*handle != NULL));
+                RESULT_ASSERT(hashtableNonConcRemove(commApiSimple->handleMap, (void *) msg->msgId, (void **)handle), !=, 0);
+                ASSERT(*handle != NULL);
             }
             (*handle)->response = msg;
             (*handle)->status = HDL_RESPONSE_OK;
         }
     }
-    return ret;
+    RETURN_PROFILE(ret);
 }
 
 u8 waitMessageSimpleCommApi(ocrCommApi_t *self, ocrMsgHandle_t **handle) {
+    START_PROFILE(commapi_waitMessageSimpleCommApi);
     u8 ret = 0;
     do {
         ret = self->fcts.pollMessage(self, handle);
     } while(ret != POLL_MORE_MESSAGE);
 
-    return ret;
+    RETURN_PROFILE(ret);
 }
 
 void simpleCommApiDestruct (ocrCommApi_t * base) {
@@ -208,7 +215,7 @@ u8 simpleCommApiSwitchRunlevel(ocrCommApi_t *self, ocrPolicyDomain_t *PD, ocrRun
             //BUG #527: memory reclaim: would like to make sure this is empty, otherwise it probably
             //means there are pending communication so we shouldn't be in tear down.
             ocrCommApiSimple_t * commApiSimple = (ocrCommApiSimple_t *) self;
-            destructHashtable(commApiSimple->handleMap, NULL);
+            destructHashtable(commApiSimple->handleMap, NULL, NULL);
         }
         break;
     case RL_COMPUTE_OK:
@@ -263,6 +270,7 @@ ocrCommApiFactory_t *newCommApiFactorySimple(ocrParamList_t *perType) {
     base->apiFcts.destruct = FUNC_ADDR(void (*)(ocrCommApi_t*), simpleCommApiDestruct);
     base->apiFcts.switchRunlevel = FUNC_ADDR(u8 (*)(ocrCommApi_t*, ocrPolicyDomain_t*, ocrRunlevel_t,
                                                       phase_t, u32, void (*)(ocrPolicyDomain_t*, u64), u64), simpleCommApiSwitchRunlevel);
+    base->apiFcts.initHandle = FUNC_ADDR(u8 (*)(ocrCommApi_t*, ocrMsgHandle_t*), simpleCommApiInitHandle);
     base->apiFcts.sendMessage = FUNC_ADDR(u8 (*)(ocrCommApi_t*, ocrLocation_t, ocrPolicyMsg_t *, ocrMsgHandle_t**, u32),
                                           sendMessageSimpleCommApi);
     base->apiFcts.pollMessage = FUNC_ADDR(u8 (*)(ocrCommApi_t*, ocrMsgHandle_t**),

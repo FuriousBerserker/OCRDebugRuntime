@@ -14,6 +14,7 @@ import sys
 import os
 import datetime
 import csv
+import re
 
 # Import perftest_baseval dict which contains values
 # against which execution times will be normalized
@@ -28,52 +29,40 @@ def main():
 
     archiveDir = sys.argv[1]
     oFile = sys.argv[2]
-    print("IN PYTHON archiveDir %s\n" % archiveDir);
     statFileList = os.listdir(archiveDir)
-    statFileList.sort()
+    #sorting from https://blog.codinghorror.com/sorting-for-humans-natural-sort-order/
+    convert = lambda text: int(text) if text.isdigit() else text
+    alphanum_key = lambda key: [ convert(c) for c in re.split('([0-9]+)', key) ]
+    statFileList.sort(key=alphanum_key)
     testdict = dict()
-    print("IN PYTHON 33 %s\n" % oFile);
-    print("statFileList %s \n" % statFileList);
     for filename in statFileList:
         fd = open(os.path.join(archiveDir,filename), 'r')
         reader = csv.reader(fd)
-        print("process filename %s\n" % os.path.join(archiveDir,filename));
         # x axis labels. Jenkins plot will reflect build number with date , manual won't.
         if (os.getenv("WORKSPACE")):
             # Jenkins running infra
             modifiedFileName = os.path.splitext(filename)[0]
         else:
-            modifiedFileName = os.path.splitext(filename)[0]
-            #TODO: commented this out because it doesn't do shit
+            #TODO: commented this out because it doesn't work
             # modifiedFileName = "b#" + os.path.splitext(filename)[0] + "(" + datetime.datetime.now().strftime("%b%d") + ")"
-        print("modifiedFileName %s\n" % modifiedFileName);
+            modifiedFileName = os.path.splitext(filename)[0]
         # Extract test data from the stat file ( one per build ) in Archive dir
         for row in reader:
-            print("row %s\n" % row);
-            print("row[0] %s\n" % row[0]);
-            print("row[1] %s\n" % row[1]);
-            print ("perfTestBaseval %s\n" % perfTestBaseval)
-            print ("perfTestBaseval.perftest_baseval %s\n" % perfTestBaseval.perftest_baseval)
-            key                    = row[0]                      # Test name - Key
+            key                    = row[0] # Test name - Key
             filenameExecTimeTuple  = (modifiedFileName , (float(row[1])/float(perfTestBaseval.perftest_baseval[key]))) # Value of key , Normalized runtimes
-            print("perfTestBaseval.perftest_baseval[key] %s\n" % perfTestBaseval.perftest_baseval[key]);
-            print("(float(row[1])/float(perfTestBaseval.perftest_baseval[key])) %s\n" % (float(row[1])/float(perfTestBaseval.perftest_baseval[key])));
-            print("key: %s\n", key);
-            print("time: %s\n", filenameExecTimeTuple);
             if key not in testdict:
                testdict.setdefault(key,[filenameExecTimeTuple])
-               print("key not in\n");
             else:
                testdict[key].append(filenameExecTimeTuple)
-               print("key in\n");
         fd.close()
-        print("done with  %s\n" % modifiedFileName);
 
     # Purge old output file , if exist
     if os.path.isfile(oFile):
         os.remove(oFile)
 
-    print("open oFile %s\n" % oFile);
+    num_points = int(os.getenv("OCR_APPS_PLOT_POINTS") or 0)
+    if (num_points <= 0):
+        num_points = 99
     fd = open(oFile, 'w')
     for key in testdict:
         buildtimeTupleList = []
@@ -82,9 +71,8 @@ def main():
         for ele in testdict[key]:
             buildList.append(ele[0])
             execTimeList.append(str(ele[1]))
-        fd.write(key + " " + ",".join(buildList) + " " + ",".join(execTimeList)+'\n')
+        fd.write(key + " " + ",".join(buildList[-num_points:]) + " " + ",".join(execTimeList[-num_points:])+'\n')
     fd.close()
-    print("close oFile %s\n" % oFile);
 
 if __name__ == '__main__':
     main()

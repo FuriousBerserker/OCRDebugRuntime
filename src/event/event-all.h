@@ -35,11 +35,11 @@ const char * event_types [] = {
 
 // Add other events using the same pattern as above
 
-inline ocrEventFactory_t *newEventFactory(eventType_t type, ocrParamList_t *typeArg) {
+static inline ocrEventFactory_t *newEventFactory(eventType_t type, ocrParamList_t *typeArg) {
     switch(type) {
 #ifdef ENABLE_EVENT_HC
     case eventHc_id:
-        return newEventFactoryHc(typeArg, (u32)type);
+        return newEventFactoryHc(typeArg, typeArg->id);
 #endif
     default:
         ASSERT(0);

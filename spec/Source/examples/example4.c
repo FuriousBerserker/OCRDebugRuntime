@@ -5,7 +5,7 @@
  */
 
 /* Example usage of RW (Read-Write)
- * datablock access mode in OCR
+ * data block access mode in OCR
  *
  * Implements the following dependence graph:
  *
@@ -39,7 +39,7 @@ ocrGuid_t exampleEdt(u32 paramc, u64* paramv, u32 depc, ocrEdtDep_t depv[]) {
 
 ocrGuid_t awaitingEdt(u32 paramc, u64* paramv, u32 depc, ocrEdtDep_t depv[]) {
     u64 i;
-    PRINTF("Done!\n");
+    ocrPrintf("Done!\n");
     u32 *dbPtr = (u32*)depv[0].ptr;
     for (i = 0; i < N; i++) {
         if (dbPtr[i] != i * 2)
@@ -47,9 +47,9 @@ ocrGuid_t awaitingEdt(u32 paramc, u64* paramv, u32 depc, ocrEdtDep_t depv[]) {
     }
 
     if (i == N) {
-        PRINTF("Passed Verification\n");
+        ocrPrintf("Passed Verification\n");
     } else {
-        PRINTF("!!! FAILED !!! Verification\n");
+        ocrPrintf("!!! FAILED !!! Verification\n");
     }
 
     ocrDbDestroy(depv[0].guid);
@@ -63,7 +63,7 @@ ocrGuid_t mainEdt(u32 paramc, u64* paramv, u32 depc, ocrEdtDep_t depv[]) {
     // CHECKER DB
     u32* ptr;
     ocrGuid_t dbGuid;
-    ocrDbCreate(&dbGuid, (void**)&ptr, N * sizeof(u32), DB_PROP_NONE, NULL_GUID, NO_ALLOC);
+    ocrDbCreate(&dbGuid, (void**)&ptr, N * sizeof(u32), DB_PROP_NONE, NULL_HINT, NO_ALLOC);
     for(i = 0; i < N; i++)
         ptr[i] = i;
     ocrDbRelease(dbGuid);
@@ -77,28 +77,27 @@ ocrGuid_t mainEdt(u32 paramc, u64* paramv, u32 depc, ocrEdtDep_t depv[]) {
     args[0] = 0;
     args[1] = N/2;
     ocrEdtCreate(&exampleEdtGuid1, exampleTemplGuid, EDT_PARAM_DEF, args, EDT_PARAM_DEF, NULL,
-        EDT_PROP_NONE, NULL_GUID, &exampleEventGuid1);
+        EDT_PROP_NONE, NULL_HINT, &exampleEventGuid1);
 
     // EDT2
     args[0] = N/2;
     args[1] = N;
     ocrEdtCreate(&exampleEdtGuid2, exampleTemplGuid, EDT_PARAM_DEF, args, EDT_PARAM_DEF, NULL,
-        EDT_PROP_NONE, NULL_GUID, &exampleEventGuid2);
+        EDT_PROP_NONE, NULL_HINT, &exampleEventGuid2);
 
     // AWAIT EDT
     ocrGuid_t awaitingTemplGuid, awaitingEdtGuid;
     ocrEdtTemplateCreate(&awaitingTemplGuid, awaitingEdt, 0 /*paramc*/, 3 /*depc*/);
     ocrEdtCreate(&awaitingEdtGuid, awaitingTemplGuid, EDT_PARAM_DEF, NULL, EDT_PARAM_DEF, NULL,
-        EDT_PROP_NONE, NULL_GUID, NULL);
+        EDT_PROP_NONE, NULL_HINT, NULL);
     ocrAddDependence(dbGuid,            awaitingEdtGuid, 0, DB_MODE_CONST);
     ocrAddDependence(exampleEventGuid1, awaitingEdtGuid, 1, DB_DEFAULT_MODE);
     ocrAddDependence(exampleEventGuid2, awaitingEdtGuid, 2, DB_DEFAULT_MODE);
 
     // START
-    PRINTF("Start!\n");
+    ocrPrintf("Start!\n");
     ocrAddDependence(dbGuid, exampleEdtGuid1, 0, DB_MODE_RW);
     ocrAddDependence(dbGuid, exampleEdtGuid2, 0, DB_MODE_RW);
 
     return NULL_GUID;
 }
-

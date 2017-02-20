@@ -1,6 +1,7 @@
 #include "ocr-config.h"
 #include "ocr-types.h"
 #include "ocr-sal.h"
+#include "utils/profiler/profiler.h"
 
 //
 // Common part of the SAL for all architectures
@@ -8,7 +9,7 @@
 
 void _ocrAssert(bool val, const char* str, const char* file, u32 line) {
     if(!val) {
-      PRINTF("ASSERT: %s @ %s:%u\n", str, file, line);
+      PRINTF("ASSERT: %s @ %s:%"PRIu32"\n", str, file, line);
     }
     sal_assert(val, file, line);
 }
@@ -256,7 +257,7 @@ static void ftona(char ** buf, u32 * chars, u32 size, u32 precision, double fp, 
             // Size check
             if((*chars) >= (size - 1 - 1)) goto out;
 
-            *(*buf)++ = '0' + inte%10;
+            *(*buf)++ = '0' + (inte % 10);
             inte = inte/10;
             (*chars)++;
         }
@@ -500,6 +501,7 @@ badfmt:
 }
 
 u32 SNPRINTF(char * buf, u32 size, const char * fmt, ...) {
+    START_PROFILE(ocr_SNPRINTF);
     u32 tmp;
     __builtin_va_list ap;
 
@@ -509,7 +511,7 @@ u32 SNPRINTF(char * buf, u32 size, const char * fmt, ...) {
 
     __builtin_va_end(ap);
 
-    return tmp;
+    RETURN_PROFILE(tmp);
 }
 
 
@@ -521,7 +523,7 @@ u32 SNPRINTF(char * buf, u32 size, const char * fmt, ...) {
 //   64-bit pointers: %p
 //   floating point:  %f %e %E
 //
-// In addition, the # flag is supported for %x, %lx, %llx
+// In addition, the # flag is supported for %d, %lx, %x
 // In addition, precision is supported for %f %e %E
 //
 
@@ -530,6 +532,7 @@ u32 SNPRINTF(char * buf, u32 size, const char * fmt, ...) {
 #endif
 
 u32 PRINTF(const char * fmt, ...) {
+    START_PROFILE(ocr_PRINTF);
     u32 tmp;
     __builtin_va_list ap;
 
@@ -544,5 +547,5 @@ u32 PRINTF(const char * fmt, ...) {
 
     sal_print(printf_buf, tmp+1);
 
-    return tmp;
+    RETURN_PROFILE(tmp);
 }

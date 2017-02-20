@@ -35,13 +35,6 @@
 // Comp-target
 #define ENABLE_COMP_TARGET_PASSTHROUGH
 
-// Scheduler Objects
-#define ENABLE_SCHEDULER_OBJECT_WST
-#define ENABLE_SCHEDULER_OBJECT_DEQ
-
-// Scheduler Heuristic
-#define ENABLE_SCHEDULER_HEURISTIC_CE
-
 // Datablock
 #define ENABLE_DATABLOCK_REGULAR
 #define ENABLE_DATABLOCK_LOCKABLE
@@ -55,12 +48,13 @@
 
 // GUID provider
 #define ENABLE_GUID_PTR
+#define ENABLE_GUID_LABELED
 
 // Hints
 #define ENABLE_HINTS
 
 // HAL layer to use
-#define HAL_FSIM_CE
+#define HAL_X86_64
 
 // SAL layer to use
 #define SAL_LINUX
@@ -78,6 +72,14 @@
 // Scheduler
 #define ENABLE_SCHEDULER_COMMON
 
+// Scheduler Heuristic
+#define ENABLE_SCHEDULER_HEURISTIC_CE
+#define ENABLE_SCHEDULER_HEURISTIC_CE_AFF
+
+// Scheduler Objects
+#define ENABLE_SCHEDULER_OBJECT_WST
+#define ENABLE_SCHEDULER_OBJECT_DEQ
+
 // Sysboot layer to use
 // None - this is a builder
 
@@ -93,12 +95,27 @@
 // Workpile
 #define ENABLE_WORKPILE_CE
 
+//Extensions
+#define ENABLE_EXTENSION_LABELING
 // Build the OCR-legacy support
 //#define ENABLE_EXTENSION_LEGACY
 
 // Build pause/resume support
 //#define ENABLE_EXTENSION_PAUSE
 
+// Event creation with parameter
+#define ENABLE_EXTENSION_PARAMS_EVT
+
+//Counted Events support
+#define ENABLE_EXTENSION_COUNTED_EVT
+
+//Channel Events support
+#define ENABLE_EXTENSION_CHANNEL_EVT
+
+// Performance monitoring
+//#define ENABLE_EXTENSION_PERF
+
+// Affinity (no-op for now)
+#define ENABLE_EXTENSION_AFFINITY
+
 #endif /* __OCR_CONFIG_H__ */
-
-

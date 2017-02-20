@@ -9,6 +9,7 @@
 
 #include "debug.h"
 
+#include "ocr-errors.h"
 #include "ocr-sysboot.h"
 #include "utils/ocr-utils.h"
 #include "ocr-comm-platform.h"
@@ -108,17 +109,22 @@ ocrMsgHandle_t * createMsgHandlerDelegate(ocrCommApi_t *self, ocrPolicyMsg_t * m
     return handle;
 }
 
+u8 delegateCommInitHandle(ocrCommApi_t *self, ocrMsgHandle_t *handle) {
+    ASSERT(0);
+    return OCR_ENOTSUP;
+}
+
 /**
  * @brief delegate a message send operation to the scheduler.
  */
 u8 delegateCommSendMessage(ocrCommApi_t *self, ocrLocation_t target,
                             ocrPolicyMsg_t *message,
                             ocrMsgHandle_t **handle, u32 properties) {
+    START_PROFILE(commapi_delegateCommSendMessage);
     ocrPolicyDomain_t * pd = self->pd;
     // Message source/destination is corrupted
     ASSERT((pd->myLocation == message->srcLocation) && (target == message->destLocation));
     ASSERT(pd->myLocation != target); // Do not support sending to 'itself' (current PD).
-
     // If the message is not persistent and the marshall mode is set, we do the specified
     // copy. Otherwise it is just the mode the buffer has been copied in the first place.
 
@@ -147,10 +153,11 @@ u8 delegateCommSendMessage(ocrCommApi_t *self, ocrLocation_t target,
     }
 
     ocrMsgHandle_t * handlerDelegate = createMsgHandlerDelegate(self, message, properties);
-    DPRINTF(DEBUG_LVL_VVERB,"Delegate API: end message handle=%p, msg=%p, type=0x%x\n",
+    DPRINTF(DEBUG_LVL_VVERB,"Delegate API: end message handle=%p, msg=%p, type=0x%"PRIx32"\n",
             handlerDelegate, message, message->type);
     // Give comm handle to policy-domain
     ocrFatGuid_t fatGuid;
+    fatGuid.guid = NULL_GUID;
     fatGuid.metaDataPtr = handlerDelegate;
     PD_MSG_STACK(giveMsg);
     getCurrentEnv(NULL, NULL, NULL, &giveMsg);
@@ -166,7 +173,7 @@ u8 delegateCommSendMessage(ocrCommApi_t *self, ocrLocation_t target,
         // Set the handle for the caller
         *handle = handlerDelegate;
     }
-    return 0;
+    RETURN_PROFILE(0);
 }
 
 /**
@@ -178,6 +185,7 @@ u8 delegateCommSendMessage(ocrCommApi_t *self, ocrLocation_t target,
  *  - *handle != NULL (Poll for a specific handle completion)
  */
 u8 delegateCommPollMessage(ocrCommApi_t *self, ocrMsgHandle_t **handle) {
+    START_PROFILE(commapi_delegateCommPollMessage);
     ocrPolicyDomain_t * pd = self->pd;
     // Try to take a message from the scheduler and pass the handle as a hint.
     ocrFatGuid_t fatGuid;
@@ -204,9 +212,9 @@ u8 delegateCommPollMessage(ocrCommApi_t *self, ocrMsgHandle_t **handle) {
             // Set the handle for the caller
             *handle = (ocrMsgHandle_t *) delHandle;
         }
-        return POLL_MORE_MESSAGE;
+        RETURN_PROFILE(POLL_MORE_MESSAGE);
     }
-    return POLL_NO_MESSAGE;
+    RETURN_PROFILE(POLL_NO_MESSAGE);
 }
 
 /**
@@ -218,6 +226,7 @@ u8 delegateCommPollMessage(ocrCommApi_t *self, ocrMsgHandle_t **handle) {
  *  - *handle != NULL (Wait for a specific handle completion)
  */
 u8 delegateCommWaitMessage(ocrCommApi_t *self, ocrMsgHandle_t **handle) {
+    START_PROFILE(commapi_delegateCommWaitMessage);
     u8 ret = POLL_NO_MESSAGE;
     //BUG #130 Is there a use case to wait for a one-way to complete ?
     while(ret == POLL_NO_MESSAGE) {
@@ -244,7 +253,7 @@ u8 delegateCommWaitMessage(ocrCommApi_t *self, ocrMsgHandle_t **handle) {
         #undef PD_TYPE
         }
     }
-    return ret;
+    RETURN_PROFILE(ret);
 }
 
 ocrCommApi_t* newCommApiDelegate(ocrCommApiFactory_t *factory,
@@ -280,6 +289,7 @@ ocrCommApiFactory_t *newCommApiFactoryDelegate(ocrParamList_t *perType) {
     base->apiFcts.destruct = FUNC_ADDR(void (*)(ocrCommApi_t*), delegateCommDestruct);
     base->apiFcts.switchRunlevel = FUNC_ADDR(u8 (*)(ocrCommApi_t*, ocrPolicyDomain_t*, ocrRunlevel_t,
                                                     phase_t, u32, void (*)(ocrPolicyDomain_t*,u64), u64), delegateCommSwitchRunlevel);
+    base->apiFcts.initHandle = FUNC_ADDR(u8 (*)(ocrCommApi_t*, ocrMsgHandle_t*), delegateCommInitHandle);
     base->apiFcts.sendMessage = FUNC_ADDR(u8 (*)(ocrCommApi_t*, ocrLocation_t,
                                                       ocrPolicyMsg_t *, ocrMsgHandle_t **, u32), delegateCommSendMessage);
     base->apiFcts.pollMessage = FUNC_ADDR(u8 (*)(ocrCommApi_t*, ocrMsgHandle_t**),

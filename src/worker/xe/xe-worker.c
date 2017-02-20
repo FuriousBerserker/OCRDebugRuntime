@@ -17,9 +17,10 @@
 #include "ocr-db.h"
 #include "worker/xe/xe-worker.h"
 
-#ifdef HAL_FSIM_XE
-#include "rmd-map.h"
-#endif
+#include "xstg-arch.h"
+#include "xstg-map.h"
+
+#include "extensions/ocr-hints.h"
 
 #ifdef OCR_ENABLE_STATISTICS
 #include "ocr-statistics.h"
@@ -35,6 +36,7 @@
 /******************************************************/
 
 // Convenient to have an id to index workers in pools
+static inline u64 getWorkerId(ocrWorker_t * worker) __attribute__((unused));
 static inline u64 getWorkerId(ocrWorker_t * worker) {
     ocrWorkerXe_t * xeWorker = (ocrWorkerXe_t *) worker;
     return xeWorker->id;
@@ -47,8 +49,15 @@ static void workerLoop(ocrWorker_t * worker) {
     ocrPolicyDomain_t *pd = worker->pd;
     PD_MSG_STACK(msg);
     getCurrentEnv(NULL, NULL, NULL, &msg);
+
+#ifdef ENABLE_EXTENSION_PERF
+    ocrWorkerXe_t *xeWorker = (ocrWorkerXe_t *)worker;
+    salPerfInit(xeWorker->perfCtrs);
+#endif
+
+    bool requestIsAffinitized = true;
     while(worker->fcts.isRunning(worker)) {
-    DPRINTF(DEBUG_LVL_VVERB, "XE %lx REQUESTING WORK\n", pd->myLocation);
+        DPRINTF(DEBUG_LVL_VVERB, "XE %"PRIx64" REQUESTING WORK\n", pd->myLocation);
 #if 1 //This is disabled until we move TAKE heuristic in CE policy domain to inside scheduler
 #define PD_MSG (&msg)
 #define PD_TYPE PD_MSG_SCHED_GET_WORK
@@ -56,17 +65,75 @@ static void workerLoop(ocrWorker_t * worker) {
         PD_MSG_FIELD_IO(schedArgs).kind = OCR_SCHED_WORK_EDT_USER;
         PD_MSG_FIELD_IO(schedArgs).OCR_SCHED_ARG_FIELD(OCR_SCHED_WORK_EDT_USER).edt.guid = NULL_GUID;
         PD_MSG_FIELD_IO(schedArgs).OCR_SCHED_ARG_FIELD(OCR_SCHED_WORK_EDT_USER).edt.metaDataPtr = NULL;
+        PD_MSG_FIELD_IO(schedArgs).OCR_SCHED_ARG_FIELD(OCR_SCHED_WORK_EDT_USER).discardAffinity = !requestIsAffinitized;
         PD_MSG_FIELD_I(properties) = 0;
         if(pd->fcts.processMessage(pd, &msg, true) == 0) {
             // We got a response
             ocrFatGuid_t taskGuid = PD_MSG_FIELD_IO(schedArgs).OCR_SCHED_ARG_FIELD(OCR_SCHED_WORK_EDT_USER).edt;
-            if(taskGuid.guid != NULL_GUID) {
-                DPRINTF(DEBUG_LVL_VVERB, "XE %lx EXECUTING TASK %lx\n", pd->myLocation, taskGuid.guid);
+            if(!(ocrGuidIsNull(taskGuid.guid))) {
+                requestIsAffinitized = true; // We will make the next request in an affinitized manner
+                DPRINTF(DEBUG_LVL_VVERB, "XE %"PRIx64" EXECUTING TASK "GUIDF"\n", pd->myLocation, GUIDA(taskGuid.guid));
                 // Task sanity checks
                 ASSERT(taskGuid.metaDataPtr != NULL);
                 worker->curTask = (ocrTask_t*)taskGuid.metaDataPtr;
                 u32 factoryId = PD_MSG_FIELD_O(factoryId);
-                pd->taskFactories[factoryId]->fcts.execute(worker->curTask);
+#ifdef ENABLE_EXTENSION_PERF
+                u32 i;
+                if(worker->curTask->flags & OCR_TASK_FLAG_PERFMON_ME)
+                    salPerfStart(xeWorker->perfCtrs);
+                else DPRINTF(DEBUG_LVL_VVERB, "Steady state reached\n");
+#endif
+
+                ((ocrTaskFactory_t*)(pd->factories[factoryId]))->fcts.execute(worker->curTask);
+
+#ifdef ENABLE_EXTENSION_PERF
+                if(worker->curTask->flags & OCR_TASK_FLAG_PERFMON_ME) {
+                    salPerfStop(xeWorker->perfCtrs);
+                }
+
+                ocrPerfCounters_t* ctrs = worker->curTask->taskPerfsEntry;
+
+                if(worker->curTask->flags & OCR_TASK_FLAG_PERFMON_ME) {
+                    ctrs->count++;
+                    // Update this value - atomic update is not necessary,
+                    // we sacrifice accuracy for performance
+                    for(i = 0; i < PERF_MAX; i++) {
+                        u64 perfval = (i<PERF_HW_MAX) ? (xeWorker->perfCtrs[i].perfVal)
+                                                      : (worker->curTask->swPerfCtrs[i-PERF_HW_MAX]);
+                        u64 oldaverage = ctrs->stats[i].average;
+                        ctrs->stats[i].average = (oldaverage + perfval)>>1;
+                        // Check for steady state
+                        if(ctrs->count > STEADY_STATE_COUNT) {
+                            s64 diff = ctrs->stats[i].average - oldaverage;
+                            diff = (diff < 0)?(-diff):(diff);
+                            if(diff <= ctrs->stats[i].average >> STEADY_STATE_SHIFT)
+                                ctrs->steadyStateMask &= ~(1<<i);  // Steady state reached for this counter
+                        }
+                    }
+                }
+                else {
+                    // If hints are specified, simply read them
+                    u64 hintValue;
+                    ocrHint_t hint;
+                    u8 hintValid = 0;
+
+                    hint.type = OCR_HINT_EDT_T;
+                    ((ocrTaskFactory_t *)(pd->factories[factoryId]))->fcts.getHint(worker->curTask, &hint);
+                    for (i = OCR_HINT_EDT_STATS_HW_CYCLES; i <= OCR_HINT_EDT_STATS_FLOAT_OPS; i++) {
+                        hintValue = 0;
+                        ocrGetHintValue(&hint, i, &hintValue);
+                        if(hintValue) {
+                            ctrs->stats[i-OCR_HINT_EDT_STATS_HW_CYCLES].average = hintValue;
+                            hintValid = 1;
+                        }
+                    }
+                    if(hintValid) {
+                        ctrs->count++;
+                        ctrs->steadyStateMask = 0;
+                    }
+                }
+#endif
+
 #undef PD_TYPE
 #define PD_TYPE PD_MSG_SCHED_NOTIFY
                 getCurrentEnv(NULL, NULL, NULL, &msg);
@@ -74,12 +141,15 @@ static void workerLoop(ocrWorker_t * worker) {
                 PD_MSG_FIELD_IO(schedArgs).kind = OCR_SCHED_NOTIFY_EDT_DONE;
                 PD_MSG_FIELD_IO(schedArgs).OCR_SCHED_ARG_FIELD(OCR_SCHED_NOTIFY_EDT_DONE).guid.guid = taskGuid.guid;
                 PD_MSG_FIELD_IO(schedArgs).OCR_SCHED_ARG_FIELD(OCR_SCHED_NOTIFY_EDT_DONE).guid.metaDataPtr = taskGuid.metaDataPtr;
-                ASSERT(pd->fcts.processMessage(pd, &msg, false) == 0);
+                RESULT_ASSERT(pd->fcts.processMessage(pd, &msg, false), ==, 0);
 
                 // Important for this to be the last
                 worker->curTask = NULL;
             } else {
-                DPRINTF(DEBUG_LVL_VVERB, "XE %lx NULL RESPONSE from CE\n", pd->myLocation);
+                requestIsAffinitized = false; // Next time around, we should try in a general manner.
+                // Note that we only get here if the request was affinitized (and there is no affinitized work)
+                // OR if a shutdown occured.
+                DPRINTF(DEBUG_LVL_VVERB, "XE %"PRIx64" NULL RESPONSE from CE\n", pd->myLocation);
             }
         }
 #undef PD_MSG
@@ -126,6 +196,11 @@ static void workerLoop(ocrWorker_t * worker) {
         }
 #endif
     } /* End of while loop */
+
+#ifdef ENABLE_EXTENSION_PERF
+    salPerfShutdown(xeWorker->perfCtrs);
+#endif
+
 }
 
 void destructWorkerXe(ocrWorker_t * base) {
@@ -151,29 +226,75 @@ u8 xeWorkerSwitchRunlevel(ocrWorker_t *self, ocrPolicyDomain_t *PD, ocrRunlevel_
 
     // Call the runlevel change on the underlying platform
     switch (runlevel) {
-        case RL_PD_OK:
+    case RL_CONFIG_PARSE:
+        break;
+    case RL_NETWORK_OK:
+        break;
+    case RL_PD_OK:
+        if(properties & RL_BRING_UP) {
             // Set the worker properly the first time
             ASSERT(self->computeCount == 1);
             self->computes[0]->worker = self;
             self->pd = PD;
-            break;
-        case RL_COMPUTE_OK:
             self->location = PD->myLocation;
-            self->pd = PD;
-            ((ocrWorkerXe_t *) self)->running = true;
-            DPRINTF(DEBUG_LVL_INFO, "XE %lx Started\n", self->location);
-            break;
-        case RL_USER_OK:
-            ((ocrWorkerXe_t *) self)->running = false;
-            DPRINTF(DEBUG_LVL_INFO, "XE %lx Stopped\n", self->location);
-            break;
-        default:
-            break;
+        }
+        break;
+    case RL_MEMORY_OK:
+        break;
+    case RL_GUID_OK:
+#ifdef ENABLE_EXTENSION_PERF
+        {
+            ocrWorkerXe_t *xeWorker = (ocrWorkerXe_t *)self;
+            if((properties & RL_BRING_UP) && RL_IS_FIRST_PHASE_UP(PD, RL_GUID_OK, phase)) {
+                xeWorker->perfCtrs = PD->fcts.pdMalloc(PD, PERF_HW_MAX*sizeof(salPerfCounter));
+            } else if((properties & RL_TEAR_DOWN) && RL_IS_LAST_PHASE_DOWN(PD, RL_GUID_OK, phase)) {
+                PD->fcts.pdFree(PD, xeWorker->perfCtrs);
+            }
+        }
+#endif
+        break;
+    case RL_COMPUTE_OK:
+        if((properties & RL_BRING_UP) && RL_IS_FIRST_PHASE_UP(PD, RL_COMPUTE_OK, phase)) {
+            // Guidify ourself
+            guidify(self->pd, (u64)self, &(self->fguid), OCR_GUID_WORKER);
+            if(properties & RL_PD_MASTER) {
+                // Set who we are
+                self->computes[0]->fcts.setCurrentEnv(self->computes[0], self->pd, self);
+            }
+        }
+        if((properties & RL_TEAR_DOWN) && RL_IS_LAST_PHASE_DOWN(PD, RL_COMPUTE_OK, phase)) {
+            // Destroy GUID
+            PD_MSG_STACK(msg);
+            getCurrentEnv(NULL, NULL, NULL, &msg);
+#define PD_MSG (&msg)
+#define PD_TYPE PD_MSG_GUID_DESTROY
+            msg.type = PD_MSG_GUID_DESTROY | PD_MSG_REQUEST;
+            PD_MSG_FIELD_I(guid) = self->fguid;
+            PD_MSG_FIELD_I(properties) = 0;
+            toReturn |= self->pd->fcts.processMessage(self->pd, &msg, false);
+            self->fguid.guid = NULL_GUID;
+#undef PD_MSG
+#undef PD_TYPE
+        }
+        break;
+    case RL_USER_OK:
+        if((properties & RL_BRING_UP) && RL_IS_LAST_PHASE_UP(PD, RL_USER_OK, phase)) {
+            self->curState = GET_STATE(RL_USER_OK, 0); // We don't use the phase here
+            DPRINTF(DEBUG_LVL_INFO, "XE %"PRIx64" Started\n", self->location);
+            if(properties & RL_PD_MASTER) {
+                self->fcts.run(self);
+            }
+        } else if((properties & RL_TEAR_DOWN) && RL_IS_FIRST_PHASE_DOWN(PD, RL_USER_OK, phase)) {
+            self->curState = GET_STATE(RL_COMPUTE_OK, 0); // We don't use the phase here
+            DPRINTF(DEBUG_LVL_INFO, "XE %"PRIx64" Stopped\n", self->location);
+        }
+        break;
+    default:
+        ASSERT(0);
     }
 
     toReturn |= self->computes[0]->fcts.switchRunlevel(self->computes[0], PD, runlevel, phase, properties,
-                                                           callback, val);
-
+                                                       callback, val);
     return toReturn;
 }
 
@@ -190,21 +311,23 @@ void initializeWorkerXe(ocrWorkerFactory_t * factory, ocrWorker_t* base, ocrPara
     initializeWorkerOcr(factory, base, perInstance);
     base->type = SLAVE_WORKERTYPE;
 
-
     ocrWorkerXe_t* workerXe = (ocrWorkerXe_t*) base;
     workerXe->id = ((paramListWorkerInst_t*)perInstance)->workerId;
-    workerXe->running = false;
 }
 
 void* xeRunWorker(ocrWorker_t * worker) {
     // Need to pass down a data-structure
     ocrPolicyDomain_t *pd = worker->pd;
 
+    //TODO: we need to double check the runlevel-based thread-comp-platform
+    //and make sure the TLS is setup properly wrt to tg-x86 initialization
     u32 i;
     for(i = 0; i < worker->computeCount; i++)
         worker->computes[i]->fcts.setCurrentEnv(worker->computes[i], pd, worker);
 
-    if (pd->myLocation == 0) { //Blessed worker
+    // TODO: For x86 workers there's some notification/synchronization with the PD
+    // to callback from RL_COMPUTE_OK, busy-wait, then get transition to RL_USER_OK
+    if (pd->myLocation == MAKE_CORE_ID(0, 0, 0, 0, 0, ID_AGENT_XE0)) { //Blessed worker
 
         // This is all part of the mainEdt setup
         // and should be executed by the "blessed" worker.
@@ -217,14 +340,15 @@ void* xeRunWorker(ocrWorker_t * worker) {
         packedUserArgv = userArgsGet();
         ocrEdt_t mainEdt = mainEdtGet();
 #endif
-
+        DPRINTF(DEBUG_LVL_VERB, "Blessed worker going to read arguments @ %p\n", packedUserArgv);
         u64 totalLength = ((u64*) packedUserArgv)[0]; // already exclude this first arg
         // strip off the 'totalLength first argument'
         packedUserArgv = (void *) (((u64)packedUserArgv) + sizeof(u64)); // skip first totalLength argument
         ocrGuid_t dbGuid;
         void* dbPtr;
+        DPRINTF(DEBUG_LVL_VVERB, "Got arguments of length 0x%"PRIx64" @ %p\n", totalLength, packedUserArgv);
         ocrDbCreate(&dbGuid, &dbPtr, totalLength,
-                    DB_PROP_IGNORE_WARN, NULL_GUID, NO_ALLOC);
+                    DB_PROP_RUNTIME | DB_PROP_IGNORE_WARN, NULL_HINT, NO_ALLOC);
 
         // copy packed args to DB
         hal_memCopy(dbPtr, packedUserArgv, totalLength, 0);
@@ -239,6 +363,7 @@ void* xeRunWorker(ocrWorker_t * worker) {
         PD_MSG_FIELD_IO(guid.metaDataPtr) = NULL;
         PD_MSG_FIELD_I(edt.guid) = NULL_GUID;
         PD_MSG_FIELD_I(edt.metaDataPtr) = NULL;
+        PD_MSG_FIELD_I(srcLoc) = pd->myLocation;
         PD_MSG_FIELD_I(ptr) = NULL;
         PD_MSG_FIELD_I(size) = 0;
         PD_MSG_FIELD_I(properties) = 0;
@@ -251,10 +376,12 @@ void* xeRunWorker(ocrWorker_t * worker) {
         ocrGuid_t edtTemplateGuid = NULL_GUID, edtGuid = NULL_GUID;
         ocrEdtTemplateCreate(&edtTemplateGuid, mainEdt, 0, 1);
         ocrEdtCreate(&edtGuid, edtTemplateGuid, EDT_PARAM_DEF, /* paramv=*/ NULL,
-                     EDT_PARAM_DEF, /* depv=*/&dbGuid, EDT_PROP_NONE, NULL_GUID, NULL);
+                     EDT_PARAM_DEF, /* depv=*/&dbGuid, EDT_PROP_NONE,
+                     NULL_HINT, NULL);
+        DPRINTF(DEBUG_LVL_INFO, "Launched mainEDT from worker %"PRId64"\n", getWorkerId(worker));
     }
 
-    DPRINTF(DEBUG_LVL_INFO, "Starting scheduler routine of worker %ld\n", getWorkerId(worker));
+    DPRINTF(DEBUG_LVL_INFO, "Starting scheduler routine of worker %"PRId64"\n", getWorkerId(worker));
     workerLoop(worker);
     return NULL;
 }
@@ -265,14 +392,13 @@ void* xeWorkShift(ocrWorker_t* worker) {
 }
 
 bool xeIsRunningWorker(ocrWorker_t * base) {
-    ocrWorkerXe_t * xeWorker = (ocrWorkerXe_t *) base;
-    return xeWorker->running;
+    return GET_STATE_RL(base->curState) == RL_USER_OK;
 }
 
 void xePrintLocation(ocrWorker_t *base, char* location) {
 #ifdef HAL_FSIM_XE
-    SNPRINTF(location, 32, "XE %d Block %d Unit %d", AGENT_FROM_ID(base->location),
-             BLOCK_FROM_ID(base->location), UNIT_FROM_ID(base->location));
+    SNPRINTF(location, 32, "XE %"PRId64" Block %"PRId64" Cluster %"PRId64"", AGENT_FROM_ID(base->location),
+             BLOCK_FROM_ID(base->location), CLUSTER_FROM_ID(base->location));
 #else
     SNPRINTF(location, 32, "XE");
 #endif

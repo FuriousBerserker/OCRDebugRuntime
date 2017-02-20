@@ -1,42 +1,38 @@
 #!/bin/bash
 
 # We start out in JJOB_PRIVATE_HOME
-
+# Nothing is copied over so we can do some fine-tuning; the repos are getting
+# way too big...
 if [ $# > 0 ]; then
     TG=$1
 else
     TG=""
 fi
 
-# Make sure the Jenkins system is fully accessible in the shared home
-# We also copy any apps/ makefiles and datasets
-# We also copy the CnC-OCR toolchain and the ROSE toolchain
-mkdir -p ${JJOB_SHARED_HOME}/xstack/jenkins
-mkdir -p ${JJOB_SHARED_HOME}/xstack/ocr/jenkins
-mkdir -p ${JJOB_SHARED_HOME}/xstack/ocr/scripts
-mkdir -p ${JJOB_SHARED_HOME}/xstack/ocr/examples
-mkdir -p ${JJOB_SHARED_HOME}/xstack/apps
-mkdir -p ${JJOB_SHARED_HOME}/xstack/hll/cnc
-mkdir -p ${JJOB_SHARED_HOME}/xstack/hll/rose
-
-cp -r ${JJOB_PRIVATE_HOME}/xstack/jenkins/* ${JJOB_SHARED_HOME}/xstack/jenkins/
-cp -r ${JJOB_PRIVATE_HOME}/xstack/ocr/jenkins/* ${JJOB_SHARED_HOME}/xstack/ocr/jenkins/
-cp -r ${JJOB_PRIVATE_HOME}/xstack/ocr/scripts/* ${JJOB_SHARED_HOME}/xstack/ocr/scripts/
-cp -r ${JJOB_PRIVATE_HOME}/xstack/ocr/examples/* ${JJOB_SHARED_HOME}/xstack/ocr/examples/
-rsync -aq -r ${JJOB_PRIVATE_HOME}/xstack/apps/ ${JJOB_SHARED_HOME}/xstack/apps/ --exclude libs
-mkdir -p ${JJOB_SHARED_HOME}/xstack/apps/libs
-rsync -aq -r ${JJOB_PRIVATE_HOME}/xstack/apps/libs/src ${JJOB_SHARED_HOME}/xstack/apps/libs --exclude trilinos --exclude libcxx --exclude libswtest --exclude libunwind --exclude libcxxabi --exclude ocrscaffold --exclude "ocr-glibc"
-#find ${JJOB_PRIVATE_HOME}/xstack/apps/libs/src -maxdepth 1 -type d -not -name "trilinos" -print0 | xargs -0 cp -r -t ${JJOB_SHARED_HOME}/xstack/apps/libs/src
-cp -rT ${JJOB_PRIVATE_HOME}/xstack/hll/cnc ${JJOB_SHARED_HOME}/xstack/hll/cnc
-cp -rT ${JJOB_PRIVATE_HOME}/xstack/hll/rose ${JJOB_SHARED_HOME}/xstack/hll/rose
+# Copy things from the initial directory
+rsync -av ${JJOB_INITDIR_OCR} ${JJOB_PRIVATE_HOME} --exclude .git
+rsync -av  ${JJOB_INITDIR_APPS} ${JJOB_PRIVATE_HOME} --exclude .git
 
 if [ "x$TG" == "xtg" ]; then
-    mkdir -p ${JJOB_SHARED_HOME}/intel/ss/jenkins
-    cp -r ${JJOB_PRIVATE_HOME}/intel/ss/jenkins/* ${JJOB_SHARED_HOME}/intel/ss/jenkins/
-    mkdir -p ${JJOB_SHARED_HOME}/xstack/apps/libs/tg/lib
-    mkdir -p ${JJOB_SHARED_HOME}/xstack/apps/libs/tg/include
+    mkdir -p ${JJOB_PRIVATE_HOME}/tg/tg/
+    # This is for the tg-xe build
+    mkdir -p ${JJOB_PRIVATE_HOME}/apps/apps/libs/install/tg-xe
+    cp -r ${JJOB_INITDIR_TG}/tg/tgkrnl ${JJOB_PRIVATE_HOME}/tg/tg
+    cp -r ${JJOB_INITDIR_TG}/tg/build ${JJOB_PRIVATE_HOME}/tg/tg
+    cp -r ${JJOB_INITDIR_TG}/tg/common ${JJOB_PRIVATE_HOME}/tg/tg
+    cp -r ${JJOB_INITDIR_TG}/tg/jenkins ${JJOB_PRIVATE_HOME}/tg/tg
 fi
 
-mkdir -p ${JJOB_SHARED_HOME}/xstack/apps/libs/x86/lib
-mkdir -p ${JJOB_SHARED_HOME}/xstack/apps/libs/x86/include
-ln -s ${JJOB_SHARED_HOME}/xstack/apps/makefiles ${JJOB_SHARED_HOME}/xstack/ocr/examples/makefiles
+# Make sure the Jenkins system is fully accessible in the shared home
+mkdir -p ${JJOB_SHARED_HOME}/ocr/jenkins
+mkdir -p ${JJOB_SHARED_HOME}/ocr/ocr/jenkins
+mkdir -p ${JJOB_SHARED_HOME}/ocr/ocr/scripts
+
+cp -r ${JJOB_PRIVATE_HOME}/ocr/jenkins/* ${JJOB_SHARED_HOME}/ocr/jenkins/
+cp -r ${JJOB_PRIVATE_HOME}/ocr/ocr/jenkins/* ${JJOB_SHARED_HOME}/ocr/ocr/jenkins/
+cp -r ${JJOB_PRIVATE_HOME}/ocr/ocr/scripts/* ${JJOB_SHARED_HOME}/ocr/ocr/scripts/
+
+if [ "x$TG" == "xtg" ]; then
+    mkdir -p ${JJOB_SHARED_HOME}/tg/tg/jenkins
+    cp -r ${JJOB_PRIVATE_HOME}/tg/tg/jenkins/* ${JJOB_SHARED_HOME}/tg/tg/jenkins/
+fi

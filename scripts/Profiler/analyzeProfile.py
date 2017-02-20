@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 
 # Modified in 2014 by Romain Cledat (now at Intel). The original
 # license (BSD) is below. This file is also subject to the license
@@ -77,7 +77,7 @@ class EnsembleStatistics(object):
             self.gatheringThread.threadName = "Node %s" % (self.nodeName)
         else:
             self.gatheringThread.addInstance(thread)
-            self.allThreads.append(thread)
+        self.allThreads.append(thread)
 
     def calculateStatistics(self):
         self.gatheringThread.calculateStatistics()

@@ -58,9 +58,6 @@
 #include "simple-allocator.h"
 #include "allocator/allocator-all.h"
 #include "ocr-mem-platform.h"
-#if defined(HAL_FSIM_CE) || defined(HAL_FSIM_XE)
-#include "rmd-map.h"
-#endif
 
 #define ALIGNMENT 8LL
 
@@ -159,113 +156,13 @@
 #define VALGRIND_CHUNK_CLOSE_COND(X, Y)
 #endif
 
-// This is for only TG. It's no-op for other arch.
-// On TG, this canonicalize the given address. This ensures correct memory deallocations when
-// EDTs are scheduled to other blocks and the address is passed to free() on that other block.
-void *addrGlobalizeOnTG(void *result, ocrPolicyDomain_t *self)
-{
-#if defined(HAL_FSIM_CE) || defined(HAL_FSIM_XE)
-    //void *orig = result;
-
-    // ideally we'd like to use the size of each memory as the end of each area.
-    // canonicalize addresses for L3 SPAD (USM -- unit shared mem)
-    if((u64)result <= UR_BSM_BASE(0, 0) /* as Bala suggested */ && (u64)result >= UR_USM_BASE) {
-        void *newresult = (void *)DR_USM_BASE(CHIP_FROM_ID(self->myLocation),
-                                    UNIT_FROM_ID(self->myLocation))
-                                    + (u64)(result - UR_USM_BASE);
-        //DPRINTF(DEBUG_LVL_INFO, "USM conv: %p -> %p\n", result, newresult );
-        result = newresult;
-    }
-    // Canonicalize addresses for L2 SPAD (BSM -- block shared mem)
-    if((u64)result <= BSM_MSR_BASE(0) && (u64)result >= BR_BSM_BASE(0)) {
-        void *newresult = (void *)DR_BSM_BASE(CHIP_FROM_ID(self->myLocation),
-                                    UNIT_FROM_ID(self->myLocation),
-                                    BLOCK_FROM_ID(self->myLocation), 0)
-                                    + (u64)(result - BR_BSM_BASE(0));
-        //DPRINTF(DEBUG_LVL_INFO, "BSM conv: %p -> %p\n", result, newresult );
-        result = newresult;
-    }
-
-    u64 id = AGENT_FROM_ID(self->myLocation);
-
-    if((u64)result <= NOM_L1_SIZE_KB*1024 && id < ID_AGENT_CE) {
-        result = (void *)DR_XE_BASE(CHIP_FROM_ID(self->myLocation),
-                                    UNIT_FROM_ID(self->myLocation),
-                                    BLOCK_FROM_ID(self->myLocation),
-                                    id) +
-                                    (u64)(result - 0);
-        u64 check = MAKE_CORE_ID(0,
-                                 0,
-                                 ((((u64)result >> MAP_CHIP_SHIFT) & ((1ULL<<MAP_CHIP_LEN) - 1)) - 1),
-                                 ((((u64)result >> MAP_UNIT_SHIFT) & ((1ULL<<MAP_UNIT_LEN) - 1)) - 2),
-                                 ((((u64)result >> MAP_BLOCK_SHIFT) & ((1ULL<<MAP_BLOCK_LEN) - 1)) - 2),
-                                 id);
-        //DPRINTF(DEBUG_LVL_WARN, "check:%p , self:%p, myloc:0x%lx\n", check, self, self->myLocation);
-        ASSERT(check==self->myLocation);
-        //DPRINTF(DEBUG_LVL_WARN, "globalize success : %p-> %p , id:%ld\n", orig, result, id);
-    }
-
-    if((u64)result <= XE_MSR_BASE(id) && (u64)result >= BR_XE_BASE(id)) {
-        result = (void *)DR_XE_BASE(CHIP_FROM_ID(self->myLocation),
-                                    UNIT_FROM_ID(self->myLocation),
-                                    BLOCK_FROM_ID(self->myLocation),
-                                    id) +
-                                    (u64)(result - BR_XE_BASE(id));
-        u64 check = MAKE_CORE_ID(0,
-                                 0,
-                                 ((((u64)result >> MAP_CHIP_SHIFT) & ((1ULL<<MAP_CHIP_LEN) - 1)) - 1),
-                                 ((((u64)result >> MAP_UNIT_SHIFT) & ((1ULL<<MAP_UNIT_LEN) - 1)) - 2),
-                                 ((((u64)result >> MAP_BLOCK_SHIFT) & ((1ULL<<MAP_BLOCK_LEN) - 1)) - 2),
-                                 id);
-        //DPRINTF(DEBUG_LVL_WARN, "check:%p , self:%p, myloc:0x%lx\n", check, self, self->myLocation);
-        ASSERT(check==self->myLocation);
-        //DPRINTF(DEBUG_LVL_WARN, "globalize success : %p-> %p , id:%ld , 0x%lx < x < 0x%lx\n", orig, result, id, BR_XE_BASE(id) , XE_MSR_BASE(id) );
-    }
-
-    if((u64)result <= 638 * 1024 && id == ID_AGENT_CE) {
-        result = (void *)DR_CE_BASE(CHIP_FROM_ID(self->myLocation),
-                                    UNIT_FROM_ID(self->myLocation),
-                                    BLOCK_FROM_ID(self->myLocation)) +
-                                    (u64)(result - 0);
-        u64 check = MAKE_CORE_ID(0,
-                                 0,
-                                 ((((u64)result >> MAP_CHIP_SHIFT) & ((1ULL<<MAP_CHIP_LEN) - 1)) - 1),
-                                 ((((u64)result >> MAP_UNIT_SHIFT) & ((1ULL<<MAP_UNIT_LEN) - 1)) - 2),
-                                 ((((u64)result >> MAP_BLOCK_SHIFT) & ((1ULL<<MAP_BLOCK_LEN) - 1)) - 2),
-                                 ID_AGENT_CE);
-        //DPRINTF(DEBUG_LVL_WARN, "check:%p , self:%p, myloc:0x%lx\n", check, self, self->myLocation);
-        ASSERT(check==self->myLocation);
-    }
-
-    if((u64)result <= CE_MSR_BASE && (u64)result >= BR_CE_BASE) {
-        result = (void *)DR_CE_BASE(CHIP_FROM_ID(self->myLocation),
-                                    UNIT_FROM_ID(self->myLocation),
-                                    BLOCK_FROM_ID(self->myLocation)) +
-                                    (u64)(result - BR_CE_BASE);
-        u64 check = MAKE_CORE_ID(0,
-                                 0,
-                                 ((((u64)result >> MAP_CHIP_SHIFT) & ((1ULL<<MAP_CHIP_LEN) - 1)) - 1),
-                                 ((((u64)result >> MAP_UNIT_SHIFT) & ((1ULL<<MAP_UNIT_LEN) - 1)) - 2),
-                                 ((((u64)result >> MAP_BLOCK_SHIFT) & ((1ULL<<MAP_BLOCK_LEN) - 1)) - 2),
-                                 ID_AGENT_CE);
-        //DPRINTF(DEBUG_LVL_WARN, "check:%p , self:%p, myloc:0x%lx, [%lx,%lx]\n", check, self, self->myLocation, CE_MSR_BASE, BR_CE_BASE);
-        ASSERT(check==self->myLocation);
-    }
-
-//    if (orig == result)
-//        DPRINTF(DEBUG_LVL_WARN, "globalize skipped : %p , id:%ld , 0x%lx < x < 0x%lx\n", result, id, BR_XE_BASE(id) , XE_MSR_BASE(id) );
-#endif
-    return result;
-}
-
-
 static void simpleTest(u64 start, u64 size)
 {
 #if 1
     // boundary check code for sanity check.
     // This helps early detection of malformed addresses.
     do {
-        DPRINTF(DEBUG_LVL_INFO, "simpleBegin : pool range [%p - %p)\n", start, start+size);
+        DPRINTF(DEBUG_LVL_INFO, "simpleBegin : pool range [0x%"PRIx64" - 0x%"PRIx64")\n", start, start+size);
 
         u8 *p = (u8 *)((start + size - 128)&(~0x7UL));      // at least 128 bytes
         u8 *q = (u8 *)(start + size);
@@ -297,10 +194,10 @@ static void simpleInit(pool_t *pool, u64 size)
     // pool->lock and pool->inited is already 0 at startup (on x86, it's done at mallocBegin())
 #ifdef ENABLE_VALGRIND
     VALGRIND_MAKE_MEM_DEFINED(&(pool->lock), sizeof(pool->lock));
-    hal_lock32(&(pool->lock));
+    hal_lock(&(pool->lock));
     VALGRIND_MAKE_MEM_NOACCESS(&(pool->lock), sizeof(pool->lock));
 #else
-    hal_lock32(&(pool->lock));
+    hal_lock(&(pool->lock));
 #endif
 
 #ifdef ENABLE_VALGRIND
@@ -315,7 +212,7 @@ static void simpleInit(pool_t *pool, u64 size)
         pool->pool_start = (u64 *)q;
         pool->pool_end = (u64 *)(p+size+sizeof(pool_t));
         pool->freelist = (u64 *)q;
-        DPRINTF(DEBUG_LVL_INFO, "init'ed pool %p, avail %ld bytes , sizeof(pool_t) = %ld\n", pool, size, sizeof(pool_t));
+        DPRINTF(DEBUG_LVL_INFO, "init'ed pool %p, avail %"PRId64" bytes , sizeof(pool_t) = %zd\n", pool, size, sizeof(pool_t));
         pool->inited = 1;
 #ifdef ENABLE_VALGRIND
         VALGRIND_CREATE_MEMPOOL(p, 0, 1);  // BUG #600: Mempool needs to be destroyed
@@ -330,10 +227,10 @@ static void simpleInit(pool_t *pool, u64 size)
 
 #ifdef ENABLE_VALGRIND
     VALGRIND_MAKE_MEM_DEFINED(&(pool->lock), sizeof(pool->lock));
-    hal_unlock32(&(pool->lock));
+    hal_unlock(&(pool->lock));
     VALGRIND_MAKE_MEM_NOACCESS(&(pool->lock), sizeof(pool->lock));
 #else
-    hal_unlock32(&(pool->lock));
+    hal_unlock(&(pool->lock));
 #endif
 }
 
@@ -354,13 +251,13 @@ static void simplePrint(pool_t *pool)
         count++;
         size += GET_SIZE(HEAD(p));
         ASSERT(GET_BIT0(HEAD(p)) == 0);
-        //printf("%p [%d]: size %d next %d prev %d \n", p, p-(pool->pool_start) , HEAD(p), NEXT(p), PREV(p) );
+        //printf("%p [%"PRId32"]: size %"PRId32" next %"PRId32" prev %"PRId32" \n", p, p-(pool->pool_start) , HEAD(p), NEXT(p), PREV(p) );
         next = NEXT(p) + pool->pool_start;
         if (next == pool->freelist)
             break;
         p = next;
     } while(1);
-    DPRINTF(DEBUG_LVL_VERB, "[free list] count %ld  size %ld (%lx)\n", count, size, size);
+    DPRINTF(DEBUG_LVL_VERB, "[free list] count %"PRId64"  size %"PRId64" (%"PRIx64")\n", count, size, size);
 }
 
 static void simpleWalk(pool_t *pool)
@@ -378,7 +275,7 @@ static void simpleWalk(pool_t *pool)
         size = GET_SIZE(HEAD(p));
         ASSERT((size & ALIGNMENT_MASK) == 0);
         if (TAIL(p, size) != size) {
-            DPRINTF(DEBUG_LVL_WARN, "[walk] two sizes doesn't match. p=%p  size=%ld , tail=%ld\n", p, size, TAIL(p,size));
+            DPRINTF(DEBUG_LVL_WARN, "[walk] two sizes doesn't match. p=%p  size=%"PRId64" , tail=%"PRId64"\n", p, size, TAIL(p,size));
             break;
         }
 
@@ -391,7 +288,7 @@ static void simpleWalk(pool_t *pool)
             break;
         }
     } while(1);
-    DPRINTF(DEBUG_LVL_VERB, "[walk] count %ld\n", count);
+    DPRINTF(DEBUG_LVL_VERB, "[walk] count %"PRId64"\n", count);
 }
 #endif
 
@@ -473,14 +370,14 @@ static void simpleDeleteFree(pool_t *pool,u64 *p)
 static void *simpleMalloc(pool_t *pool,u64 size, struct _ocrPolicyDomain_t *pd)
 {
     VALGRIND_POOL_OPEN(pool);
-    hal_lock32(&(pool->lock));
+    hal_lock(&(pool->lock));
     u64 *p = pool->freelist;
     VALGRIND_POOL_CLOSE(pool);
     u64 *next;
 #ifdef ENABLE_VALGRIND
     u64 size_orig = size;
 #endif
-    DPRINTF(DEBUG_LVL_VERB, "before malloc size %ld:\n", size);
+    DPRINTF(DEBUG_LVL_VERB, "before malloc size %"PRId64":\n", size);
     //simplePrint(pool);
     if (p == NULL)
         goto exit_fail;
@@ -510,7 +407,7 @@ static void *simpleMalloc(pool_t *pool,u64 size, struct _ocrPolicyDomain_t *pd)
             ASSERT_BLOCK_END
             VALGRIND_CHUNK_CLOSE(p);
             VALGRIND_POOL_OPEN(pool);
-            hal_unlock32(&(pool->lock));
+            hal_unlock(&(pool->lock));
             VALGRIND_POOL_CLOSE(pool);
 #ifdef ENABLE_VALGRIND
             VALGRIND_MEMPOOL_ALLOC(pool, ret, size_orig);
@@ -527,7 +424,7 @@ static void *simpleMalloc(pool_t *pool,u64 size, struct _ocrPolicyDomain_t *pd)
 exit_fail:
     //DPRINTF(DEBUG_LVL_INFO, "OUT OF HEAP! malloc failed\n");
     VALGRIND_POOL_OPEN(pool);
-    hal_unlock32(&(pool->lock));
+    hal_unlock(&(pool->lock));
     VALGRIND_POOL_CLOSE(pool);
     return NULL;
 }
@@ -549,7 +446,7 @@ void simpleFree(void *p)
     VALGRIND_POOL_OPEN(pool);
     u64 start = (u64)pool->pool_start;
     u64 end   = (u64)pool->pool_end;
-    hal_lock32(&(pool->lock));
+    hal_lock(&(pool->lock));
     VALGRIND_POOL_CLOSE(pool);
 
     ASSERT((*(u8 *)(&INFO2(q)) & POOL_HEADER_TYPE_MASK) == allocatorSimple_id);
@@ -625,7 +522,7 @@ void simpleFree(void *p)
     }
     simpleInsertFree(pool, &HEAD(q), size);
     VALGRIND_POOL_OPEN(pool);
-    hal_unlock32(&(pool->lock));
+    hal_unlock(&(pool->lock));
     VALGRIND_POOL_CLOSE(pool);
 #ifdef ENABLE_VALGRIND
     VALGRIND_MEMPOOL_FREE(pool, p);
@@ -636,12 +533,12 @@ void simpleFree(void *p)
 // end of simple_alloc core part
 
 void simpleDestruct(ocrAllocator_t *self) {
-    DPRINTF(DEBUG_LVL_VERB, "Entered simpleDesctruct (This is x86 only?) on allocator 0x%lx\n", (u64) self);
+    DPRINTF(DEBUG_LVL_VERB, "Entered simpleDesctruct (This is x86 only?) on allocator 0x%"PRIx64"\n", (u64) self);
     ASSERT(self->memoryCount == 1);
     self->memories[0]->fcts.destruct(self->memories[0]);
     runtimeChunkFree((u64)self->memories, PERSISTENT_CHUNK);
     runtimeChunkFree((u64)self, PERSISTENT_CHUNK);
-    DPRINTF(DEBUG_LVL_INFO, "Leaving simpleDestruct on allocator 0x%lx (free)\n", (u64) self);
+    DPRINTF(DEBUG_LVL_INFO, "Leaving simpleDestruct on allocator 0x%"PRIx64" (free)\n", (u64) self);
 }
 
 u8 simpleSwitchRunlevel(ocrAllocator_t *self, ocrPolicyDomain_t *PD, ocrRunlevel_t runlevel,
@@ -683,13 +580,13 @@ u8 simpleSwitchRunlevel(ocrAllocator_t *self, ocrPolicyDomain_t *PD, ocrRunlevel
         if((properties & RL_BRING_UP) && RL_IS_FIRST_PHASE_UP(PD, RL_MEMORY_OK, phase)) {
             ocrAllocatorSimple_t *rself = (ocrAllocatorSimple_t*)self;
             u64 poolAddr = 0;
-            DPRINTF(DEBUG_LVL_INFO, "simple bring up: poolsize 0x%llx, level %d\n",
+            DPRINTF(DEBUG_LVL_INFO, "simple bring up: poolsize 0x%"PRIx64", level %"PRIu64"\n",
                     rself->poolSize, self->memories[0]->level);
             RESULT_ASSERT(self->memories[0]->fcts.chunkAndTag(
                               self->memories[0], &poolAddr, rself->poolSize,
                               USER_FREE_TAG, USER_USED_TAG), ==, 0);
             rself->poolAddr = poolAddr;
-            DPRINTF(DEBUG_LVL_INFO, "simple bring up : %p\n", poolAddr);
+            DPRINTF(DEBUG_LVL_INFO, "simple bring up : 0x%"PRIx64"\n", poolAddr);
 
             // Adjust alignment if required
             u64 fiddlyBits = ((u64) rself->poolAddr) & (ALIGNMENT - 1LL);
@@ -704,8 +601,8 @@ u8 simpleSwitchRunlevel(ocrAllocator_t *self, ocrPolicyDomain_t *PD, ocrRunlevel
             rself->poolSize &= ~(ALIGNMENT-1LL);
 
             DPRINTF(DEBUG_LVL_VERB,
-                    "SIMPLE Allocator @ 0x%llx got pool at address 0x%llx of size 0x%llx(%lld), offset from storage addr by %lld\n",
-                    (u64) rself, (u64) (rself->poolAddr), (u64) (rself->poolSize),
+                    "SIMPLE Allocator @ %p got pool at address 0x%"PRIx64" of size 0x%"PRIx64" (%"PRId64"), offset from storage addr by %"PRId64"\n",
+                    rself, rself->poolAddr, (u64) (rself->poolSize),
                     (u64)(rself->poolSize), (u64) (rself->poolStorageOffset));
 
             ASSERT(self->memories[0]->memories[0]->startAddr /* startAddr of the memory that memplatform allocated. (for x86, at mallocBegin()) */
@@ -765,7 +662,7 @@ void* simpleAllocate(
 
     ocrAllocatorSimple_t * rself = (ocrAllocatorSimple_t *) self;
     void *ret = simpleMalloc((pool_t *)rself->poolAddr, size, self->pd);
-    DPRINTF(DEBUG_LVL_VERB, "simpleAllocate called, ret %p from PoolAddr %p\n", ret, rself->poolAddr);
+    DPRINTF(DEBUG_LVL_VERB, "simpleAllocate called, ret %p from PoolAddr 0x%"PRIx64"\n", ret, rself->poolAddr);
     return ret;
 }
 void simpleDeallocate(void* address) {

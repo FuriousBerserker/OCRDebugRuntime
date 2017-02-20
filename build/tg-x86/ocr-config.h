@@ -19,6 +19,9 @@
 // that does not contribute to building the policy domain
 //#define ENABLE_BUILDER_ONLY
 
+// Bug #694 Better handling of GUID metadata across PDs
+#define TG_X86_TARGET
+
 // Allocator
 #define ENABLE_ALLOCATOR_TLSF
 #define ENABLE_ALLOCATOR_SIMPLE
@@ -40,12 +43,6 @@
 // Comp-target
 #define ENABLE_COMP_TARGET_PASSTHROUGH
 
-// Scheduler Objects
-#define ENABLE_SCHEDULER_OBJECT_NULL
-
-// Scheduler Heuristic
-#define ENABLE_SCHEDULER_HEURISTIC_NULL
-
 // Datablock
 #define ENABLE_DATABLOCK_REGULAR
 #define ENABLE_DATABLOCK_LOCKABLE
@@ -53,15 +50,28 @@
 // Event
 #define ENABLE_EVENT_HC
 
+// Event creation with parameter
+#define ENABLE_EXTENSION_PARAMS_EVT
+
+// Counted Events support
+#define ENABLE_EXTENSION_COUNTED_EVT
+
+// Channel Events support
+#define ENABLE_EXTENSION_CHANNEL_EVT
+
 // External things (mostly needed by the INI parser)
 #define ENABLE_EXTERNAL_DICTIONARY
 #define ENABLE_EXTERNAL_INIPARSER
 
 // GUID provider
+#define ENABLE_GUID_LABELED
 #define ENABLE_GUID_PTR
 
 // HAL layer to use
 #define HAL_X86_64
+
+// Hints
+#define ENABLE_HINTS
 
 // Mem-platform
 #define ENABLE_MEM_PLATFORM_MALLOC
@@ -74,8 +84,18 @@
 #define ENABLE_POLICY_DOMAIN_XE
 
 // Scheduler
-#define ENABLE_SCHEDULER_CE
+#define ENABLE_SCHEDULER_COMMON
 #define ENABLE_SCHEDULER_XE
+
+// Scheduler Heuristic
+#define ENABLE_SCHEDULER_HEURISTIC_NULL
+#define ENABLE_SCHEDULER_HEURISTIC_CE
+#define ENABLE_SCHEDULER_HEURISTIC_CE_AFF
+
+// Scheduler Objects
+#define ENABLE_SCHEDULER_OBJECT_NULL
+#define ENABLE_SCHEDULER_OBJECT_WST
+#define ENABLE_SCHEDULER_OBJECT_DEQ
 
 // SAL layer to use
 #define SAL_LINUX
@@ -100,6 +120,8 @@
 // Extensions
 #define ENABLE_EXTENSION_AFFINITY
 #define ENABLE_EXTENSION_LEGACY
+#define ENABLE_EXTENSION_LABELING
+#define ENABLE_EXTENSION_RTITF
 
 // Build pause/resume support
 //#define ENABLE_EXTENSION_PAUSE

@@ -96,7 +96,7 @@ static inline void setChecksum (blkHdr_t * blkAddr) {
 
 static inline void checkChecksum (blkHdr_t * blkAddr, u32 linenum) {
     if (calcChecksum(blkAddr) != blkAddr->checksum) {
-        DPRINTF (DEBUG_LVL_WARN, "Checksum failure detected at %s line %d\n", __FILE__, linenum);
+        DPRINTF (DEBUG_LVL_WARN, "Checksum failure detected at %s line %"PRId32"\n", __FILE__, linenum);
         ASSERT(0);
     }
 }
@@ -154,7 +154,19 @@ void* mallocProxyAllocate(
     u64 size,               // Size of desired block, in bytes
     u64 hints)              // Allocator-dependent hints; not used for malloc. (Not used, but exists to match other allocators)
 {
-    DPRINTF(DEBUG_LVL_INFO, "mallocProxyAllocate called to get datablock of size %ld/0x%lx\n", (u64) size, (u64) size);
+    // mallocproxy doesn't support slab allocation, so just fall back to mallocproxy by fixing size
+    s64 type_id = (s64)size;
+    if (type_id < 0) {         // negative size is interpreted as type_id for slab allocation request
+        type_id = -type_id;
+        if (!(type_id > 0 && type_id < MAX_SLABS_NAMED )) {
+            // Too large size requested.
+            DPRINTF(DEBUG_LVL_WARN, "mallocProxyAllocate failure. Too large size %"PRId64"/0x%"PRIx64"\n", (u64) size, (u64) size);
+            return NULL;
+        }
+        size = slabSizeTable.size[type_id]; // get the original size. now size is fixed.
+    }
+
+    DPRINTF(DEBUG_LVL_INFO, "mallocProxyAllocate called to get datablock of size %"PRId64"/0x%"PRIx64"\n", (u64) size, (u64) size);
     u64 adjustedSize =
         getRealSizeOfRequest(size) +  // Client's requested size rounded up to alignment units, plus
         sizeof(blkHdr_t) +            // our block header size, plus
@@ -168,7 +180,7 @@ void* mallocProxyAllocate(
     SET_allocatorType (blkHdr, (u8) allocatorMallocProxy_id);
     setChecksum(blkHdr);
     VALGRIND_NOACCESS(blkHdr);
-    DPRINTF(DEBUG_LVL_VERB, "mallocProxyAllocate got datablock at 0x%lx (system malloc returned 0x%lx)\n", (u64) clientPayloadAddr, (u64) mallocAddr);
+    DPRINTF(DEBUG_LVL_VERB, "mallocProxyAllocate got datablock at 0x%"PRIx64" (system malloc returned 0x%"PRIx64")\n", (u64) clientPayloadAddr, (u64) mallocAddr);
 #ifdef ENABLE_ALLOCATOR_INIT_NEW_DB_PAYLOAD
     u32 i;
     for (i = 0; i < size; i+= sizeof(u64)) {
@@ -195,7 +207,7 @@ void * mallocProxyReallocate(
         warningGiven = 1;
     }
 #endif
-    DPRINTF(DEBUG_LVL_VERB, "mallocProxyRealloc called to resize 0x%lx\n to %ld/0x%lx\n",
+    DPRINTF(DEBUG_LVL_VERB, "mallocProxyRealloc called to resize 0x%"PRIx64"\n to %"PRId64"/0x%"PRIx64"\n",
         (u64) origClientPayloadAddr, (u64) size, (u64) size);
     size =
         getRealSizeOfRequest(size) +  // Client's requested size rounded up to alignment units, plus
@@ -228,7 +240,7 @@ void mallocProxyDeallocate(void * clientPayloadAddr)
 #else
 #define detail2 " "
 #endif
-    DPRINTF(DEBUG_LVL_INFO, "mallocProxyFree called to free 0x%lx, %s %s\n", (u64) clientPayloadAddr, detail1, detail2);
+    DPRINTF(DEBUG_LVL_INFO, "mallocProxyFree called to free 0x%"PRIx64", %s %s\n", (u64) clientPayloadAddr, detail1, detail2);
 #ifdef ENABLE_ALLOCATOR_TRASH_FREED_DB_PAYLOAD
     static bool firstMessage = true;
     if (firstMessage) {
@@ -244,9 +256,9 @@ void mallocProxyDeallocate(void * clientPayloadAddr)
 #ifndef ENABLE_ALLOCATOR_LEAK_FREED_DATABLOCKS
     u64 mallocAddr = (u64) clientPayloadAddr - GET_distToMallocedBlock(blkHdr);
     VALGRIND_NOACCESS(blkHdr);
-    DPRINTF(DEBUG_LVL_VERB, "calling system free on 0x%lx\n", (u64) mallocAddr);
+    DPRINTF(DEBUG_LVL_VERB, "calling system free on 0x%"PRIx64"\n", (u64) mallocAddr);
     free((void *) mallocAddr);
-    DPRINTF(DEBUG_LVL_VERB, "back from system free on 0x%lx\n", (u64) mallocAddr);
+    DPRINTF(DEBUG_LVL_VERB, "back from system free on 0x%"PRIx64"\n", (u64) mallocAddr);
 #else
     VALGRIND_NOACCESS(blkHdr);
 #endif

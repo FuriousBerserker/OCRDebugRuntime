@@ -32,6 +32,7 @@ struct _ocrPolicyDomain_t;
 typedef struct _ocrParamList_t {
     u64 size;                   /**< Size of this parameter list (in bytes) */
     struct _ocrPolicyDomain_t *policy;  /**< Policy domain for this factory/instance */
+    u32 id;                     /**< For factories, the factory ID; for other things, a unique ID (if needed) */
     char* misc;                 /**< Miscellaneous arguments (NULL terminated string) */
 } ocrParamList_t;
 
@@ -78,6 +79,7 @@ void ocr_exit();
  *
  * @param val  Value to look at
  * @return  MSB set to 1 (from 0 to 15)
+ * @warn returns 0 if val is 0
  */
 u32 fls16(u16 val);
 
@@ -87,6 +89,7 @@ u32 fls16(u16 val);
  *
  * @param val  Value to look at
  * @return  MSB set to 1 (from 0 to 31)
+ * @warn returns 0 if val is 0
  */
 u32 fls32(u32 val);
 
@@ -96,8 +99,45 @@ u32 fls32(u32 val);
  *
  * @param val  Value to look at
  * @return  MSB set to 1 (from 0 to 63)
+ * @warn returns 0 if val is 0
  */
 u32 fls64(u64 val);
+
+/**
+ * @brief Counts trailing zeros therefore
+ * returning LSB position
+ *
+ * @param val  Value to look at
+ * @return  LSB set to 1 (from 0 to 15)
+ */
+u32 ctz16(u16 val);
+
+/**
+ * @brief Counts trailing zeros therefore
+ * returning LSB position
+ *
+ * @param val  Value to look at
+ * @return  LSB set to 1 (from 0 to 31)
+ */
+u32 ctz32(u32 val);
+
+/**
+ * @brief Counts trailing zeros therefore
+ * returning LSB position
+ *
+ * @param val  Value to look at
+ * @return  LSB set to 1 (from 0 to 63)
+ */
+u32 ctz64(u64 val);
+
+/**
+ * @brief Counts the number of 1s in a
+ * 64 bit value
+ *
+ * @param val Value to look at
+ * @return Number of bits set
+ */
+u32 popcnt64(u64 val);
 
 /**
  * @brief Convenient structure to keep track
@@ -177,12 +217,30 @@ u32 ocrGuidTrackerFind(ocrGuidTracker_t *self, ocrGuid_t toFind);
 s32 ocrStrcmp(u8 *str1, u8 *str2);
 
 /**
+ * @brief String compare; behaves similar to libc's strcmp()
+ *
+ * @param str1              First string to compare
+ * @param str2              Second string to compare
+ * @param n                 Length to compare
+ * @return zero if the strings match, non-zero if they don't match
+ */
+s32 ocrStrncmp(u8 *str1, u8 *str2, u32 n);
+
+/**
  * @brief String length operation; behaves similar to libc's strlen()
  *
  * @param[in] str           NULL-terminated string
  * @return the number of characters (not including the null termination
  */
 u64 ocrStrlen(const char* str);
+
+/**
+ * @brief ascii to unsigned integer; behaves similar to atoi
+ *
+ * @param[in] char           character to convert
+ * @return the integer value of the character ranging from 0 to 9
+ */
+bool ocrIsDigit(u8 c);
 
 /* Not currently used
 typedef struct ocrPlaceTrackerStruct_t {

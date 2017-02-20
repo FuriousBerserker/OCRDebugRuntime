@@ -20,8 +20,23 @@
 #include "ocr-task.h"
 #include "ocr-types.h"
 #include "ocr-worker.h"
+#include "ocr-resiliency.h"
 
+#include "experimental/ocr-platform-model.h"
 #include "experimental/ocr-placer.h"
+
+#include "utils/queue.h"
+
+struct _pdEvent_t;
+
+/* Metadata-Cloning declarations */
+
+// Operation that triggered the cloning
+#define ocrObjectOperation_t u32
+
+// Directions
+#define MD_DIR_PULL 1
+#define MD_DIR_PUSH 2
 
 /****************************************************/
 /* PARAMETER LISTS                                  */
@@ -94,7 +109,7 @@ typedef struct _paramListPolicyDomainInst_t {
  */
 #define PD_MSG_DB_OP            0x001
 /**< Create a memory area (allocate) */
-#define PD_MSG_DB_CREATE        0x00091001
+#define PD_MSG_DB_CREATE        0x00051001
 /**< Destroy a DB (orginates from PD<->PD) */
 #define PD_MSG_DB_DESTROY       0x00082001
 /**< Acquires a DB */
@@ -117,7 +132,7 @@ typedef struct _paramListPolicyDomainInst_t {
  */
 #define PD_MSG_WORK_OP          0x004
 /**< Create an EDT */
-#define PD_MSG_WORK_CREATE      0x00121004
+#define PD_MSG_WORK_CREATE      0x000E1004
 /**< Execute this EDT (originates from PD<->PD) */
 #define PD_MSG_WORK_EXECUTE     0x00042004
 /**< Destroy an EDT (originates from PD<->PD) */
@@ -161,6 +176,10 @@ typedef struct _paramListPolicyDomainInst_t {
  * value and the GUID and optionally destroy the associated
  * metadata */
 #define PD_MSG_GUID_DESTROY     0x00046020
+
+/**< Low-level messages to push and pull metadata across policy-domains
+ */
+#define PD_MSG_METADATA_COMM    0x00007020
 
 /**< AND with this and if result non-null, GUID distribution related
  * operation (taking/giving EDTs, DBs, events, etc)
@@ -261,21 +280,30 @@ typedef struct _paramListPolicyDomainInst_t {
 /**< Get hint from guid */
 #define PD_MSG_HINT_GET      0x00042400
 
+/**< Resiliency msgs */
+#define PD_MSG_RESILIENCY_OP            0x800
+/**< Fault notification */
+#define PD_MSG_RESILIENCY_NOTIFY        0x1800
+/**< Proactive fault monitoring */
+#define PD_MSG_RESILIENCY_MONITOR       0x2800
+/**< PD checkpoint msgs */
+#define PD_MSG_RESILIENCY_CHECKPOINT    0x3800
+
 /**< And this to just get the type of the message (note that the number
  * of ocrFatGuid_t is part of the type as for a given type, this won't change)
  */
-#define PD_MSG_TYPE_ONLY        0x00FFFFFFULL
+#define PD_MSG_TYPE_ONLY        0x00FFFFFFUL
 
 /**< Get just the flags */
-#define PD_MSG_META_ONLY        0xFF000000ULL
+#define PD_MSG_META_ONLY        0xFF000000UL
 
 /**< Get just the number of ocrFatGuid_t in the in/out part */
-#define PD_MSG_FG_IO_COUNT_ONLY    0x00030000ULL
+#define PD_MSG_FG_IO_COUNT_ONLY    0x00030000UL
 
 /**< Get just the number of ocrFatGuid_t in the in part */
-#define PD_MSG_FG_I_COUNT_ONLY     0x001C0000ULL
+#define PD_MSG_FG_I_COUNT_ONLY     0x001C0000UL
 
-#define PD_MSG_FG_O_COUNT_ONLY     0x00E00000ULL
+#define PD_MSG_FG_O_COUNT_ONLY     0x00E00000UL
 
 #define PD_MSG_FG_IO_COUNT_ONLY_GET(__msgtype) ((u32) (__msgtype & PD_MSG_FG_IO_COUNT_ONLY) >> 16)
 #define PD_MSG_FG_I_COUNT_ONLY_GET(__msgtype) ((u32) (__msgtype & PD_MSG_FG_I_COUNT_ONLY) >> 18)
@@ -287,13 +315,27 @@ typedef struct _paramListPolicyDomainInst_t {
 #define PD_MSG_RESPONSE         0x02000000
 /**< Defines if the message requires a return message */
 #define PD_MSG_REQ_RESPONSE     0x04000000
+/**< Defines a message that is a request
+ * but actually a response to another query (ie:
+ * the receiver was expecting something else but
+ * we changed the response (shutdown for example) */
+#define PD_MSG_RESPONSE_OVERRIDE 0x08000000
 
-/**< Defines if the message is marked a CE-CE message */
-#define PD_CE_CE_MESSAGE        0x10000000
+/**< Defines if/how a message needs to be processed by the scheduler
+ * By default, every msg is pre-processed by scheduler by default.
+ * However the post-processing is not default and is dependent on
+ * the scheduler heuristic that is used.
+ * BUG 929 - A generic framework would be useful */
+#define PD_MSG_IGNORE_PRE_PROCESS_SCHEDULER 0x10000000 /* Bit used to turn off default pre-process of msgs */
+#define PD_MSG_REQ_POST_PROCESS_SCHEDULER   0x20000000 /* Bit to indicate if msg requires post processing */
+#define PD_MSG_LOCAL_PROCESS                0x40000000 /* Bit to indicate that the msg should be locally processed by the PD */
+
+// This is mainly used as a mean to tag a message comes from the user/rt interface
+// The runtime may or may not allow the deferrability
+#define PD_MSG_DEFERRABLE                0x80000000 /* Bit to indicate if msg execution can be deferred until end of EDT */
 
 #define PD_MSG_ARG_NAME_SUB(ID) _data_##ID
 #define PD_MSG_STRUCT_NAME(ID) PD_MSG_ARG_NAME_SUB(ID)
-
 
 #define _PD_MSG_FIELD_FULL_SUB_QUAL(ptr, type, qual, field) ptr->args._data_##type.qual.field
 #define _PD_MSG_FIELD_FULL_SUB(ptr, type, field) ptr->args._data_##type.field
@@ -345,7 +387,9 @@ struct _ocrPolicyDomain_t;
  * Use this macro to allocate a ocrPolicyMsg_t on the stack and properly set-up
  * its buffer size
  */
-#define PD_MSG_STACK(name) ocrPolicyMsg_t name; name.usefulSize = 0; name.bufferSize = sizeof(ocrPolicyMsg_t);
+#define PD_MSG_STACK(name) ocrPolicyMsg_t name; \
+    name.usefulSize = 0; name.bufferSize = sizeof(ocrPolicyMsg_t); \
+    name.srcLocation = name.destLocation = INVALID_LOCATION;
 
 /**
  * @brief Structure describing a "message" that is used to communicate between
@@ -365,19 +409,28 @@ struct _ocrPolicyDomain_t;
  * the marshalling and unmarshalling functions in policy-domain-all.c
  */
 typedef struct _ocrPolicyMsg_t {
-    u64 msgId;                  /**< Implementation specific ID identifying
-                                 * this message (if required) */
-    u64 bufferSize;             /**< Total size of the buffer containing this message */
-    u64 usefulSize;             /**< Size to transfer (useful payload). This size may be
-                                 * modified by the marshalling code (for example, it will
-                                 * be updated if elements are marshalled inside this buffer).
-                                 * Always less than or equal to bufferSize */
-    ocrLocation_t srcLocation;  /**< Source of the message
-                                 * (location making the request) */
-    ocrLocation_t destLocation; /**< Destination of the message
-                                 * (location processing the request) */
+    u64 msgId;                      /**< Implementation specific ID identifying
+                                     * this message (if required) */
+    u64 bufferSize;                 /**< Total size of the buffer containing this message */
+    u64 usefulSize;                 /**< Size to transfer (useful payload). This size may be
+                                     * modified by the marshalling code (for example, it will
+                                     * be updated if elements are marshalled inside this buffer).
+                                     * Always less than or equal to bufferSize */
+    /*ocrLocation_t origSrcLocation;*/  /**< Original source of the message (in case
+                                         * it gets forwarded around). This is currently not used
+                                         * but there is example code in the CE PD for this */
+    ocrLocation_t srcLocation;      /**< Source of the message
+                                     * (location making the request) */
+    ocrLocation_t destLocation;     /**< Destination of the message
+                                     * (location processing the request) */
     u32 type;                   /**< Type of the message. Also includes if this
                                  * is a request or a response */
+#ifdef OCR_MONITOR_NETWORK
+    u64 marshTime;
+    u64 sendTime;
+    u64 rcvTime;
+    u64 unMarshTime;
+#endif
 
     /* The following rules apply to all fields in the message:
      *     - All ocrFatGuid_t are in/out parameters in the sense
@@ -404,9 +457,9 @@ typedef struct _ocrPolicyMsg_t {
             union {
                 struct {
                     ocrFatGuid_t edt;             /** In: EDT doing the creation */
-                    ocrFatGuid_t affinity;        /**< In: Affinity group for the DB */
                     ocrDataBlockType_t dbType;    /**< In: Type of memory requested */
                     ocrInDbAllocator_t allocator; /**< In: In-DB allocator */
+                    ocrHint_t * hint;             /**< In: Hints passed by the user at DB creation time */
                 } in;
                 struct {
                     void* ptr;                    /**< Out: Address of created DB */
@@ -433,7 +486,8 @@ typedef struct _ocrPolicyMsg_t {
             // due to the implementation of the lockable DB
             //BUG #273: This is reported in bug #273
             ocrFatGuid_t guid;         /**< In: GUID of the DB to acquire */
-            ocrFatGuid_t edt;          /**< In: EDT doing the acquire */
+            ocrFatGuid_t edt;          /**< In: EDT doing the acquire (whenever relevant) */
+            ocrLocation_t destLoc;     /**< In: Destination location for the acquire */
             u32 edtSlot;               /**< In: EDT's slot if applicable else EDT_SLOT_NONE */
             u32 properties;            /**< In: Properties for acquire. Bit 0: 1 if runtime acquire */
             union {
@@ -453,6 +507,7 @@ typedef struct _ocrPolicyMsg_t {
             union {
                 struct {
                     ocrFatGuid_t edt;          /**< In: GUID of the EDT doing the release */
+                    ocrLocation_t srcLoc;      /**< In: Source location doing the release */
                     void* ptr;                 /**< In: Optionally provide pointer to the released memory */
                     u64 size;                  /**< In: Optionally provide size to the released memory */
                     u32 properties;            /**< In: Properties of the release: Bit 0: 1 if runtime release */
@@ -468,6 +523,7 @@ typedef struct _ocrPolicyMsg_t {
                 struct {
                     ocrFatGuid_t guid;         /**< In: GUID of the DB to free */
                     ocrFatGuid_t edt;          /**< In: GUID of the EDT doing the free */
+                    ocrLocation_t srcLoc;      /**< In: Location emitting the free */
                     u32 properties;            /**< In: Properties of the free */
                 } in;
                 struct {
@@ -522,11 +578,11 @@ typedef struct _ocrPolicyMsg_t {
             union {
                 struct {
                     ocrFatGuid_t templateGuid; /**< In: GUID of the template to use */
-                    ocrFatGuid_t affinity;     /**< In: Affinity for this EDT */
                     ocrFatGuid_t parentLatch;  /**< In: Parent latch for EDT */
                     ocrFatGuid_t currentEdt;   /**< In: EDT that is creating work */
                     u64 *paramv;               /**< In: Parameters for this EDT */
                     ocrFatGuid_t * depv;       /**< In: Dependences for this EDT */
+                    ocrHint_t * hint;          /**< In: Hints passed by the user at EDT creation time */
                     ocrWorkType_t workType;    /**< In: Type of work to create */
                     u32 properties;            /**< In: properties for the creation */
                 } in;
@@ -599,6 +655,9 @@ typedef struct _ocrPolicyMsg_t {
             union {
                 struct {
                     ocrFatGuid_t currentEdt;   /**< In: EDT that is creating event */
+#ifdef ENABLE_EXTENSION_PARAMS_EVT
+                    ocrEventParams_t * params;
+#endif
                     u32 properties;       /**< In: Properties for this creation */
                     ocrEventTypes_t type; /**< In: Type of the event created: Bit 0: 1 if event takes an argument */
                 } in;
@@ -645,6 +704,7 @@ typedef struct _ocrPolicyMsg_t {
                     u64 size;          /**< In: If metaDataPtr is NULL on input, contains the
                                         *   size needed to contain the metadata. Otherwise ignored */
                     ocrGuidKind kind;  /**< In: Kind of the GUID to create */
+                    ocrLocation_t targetLoc; /**< In: Target location of the GUID to create */
                     u32 properties;    /**< In: Properties for the creation. */
                 } in;
                 struct {
@@ -676,6 +736,8 @@ typedef struct _ocrPolicyMsg_t {
                                 * Out: The GUID and pointer to the cloned metadata */
             union {
                 struct {
+                    u8 type;                   /**< In: MD_CLONE or MD_MOVE */
+                    ocrLocation_t dstLocation; /**< In: The location to MOVE to */
                 } in;
                 struct {
                     u64 size;          /**< Out: Size of the metadata that was cloned */
@@ -683,6 +745,27 @@ typedef struct _ocrPolicyMsg_t {
                 } out;
             } inOrOut __attribute__ (( aligned(8) ));
         } PD_MSG_STRUCT_NAME(PD_MSG_GUID_METADATA_CLONE);
+
+        struct {
+            union {
+                struct {
+                    ocrGuid_t guid;    /**< In: The GUID of the metadata */
+                    u64 mode;          /**< In: Metadata implementation specific serialization mode */
+                    struct _ocrPolicyMsg_t * response; /** TODO: this would move into the handle_t/comm_t */
+                    void * mdPtr;      /**< In: The deserialized metadata. This is a placeholder for
+                                                when deserialize has been called on the payload,
+                                                it is NULL otherwise */
+                    u32 factoryId;     /**< In: The factory ID for the metadata */
+                    u32 sizePayload;   /**< In: The serialized metadata payload size */
+                    ocrObjectOperation_t op; /**< In: Operation that triggered the push/pull */
+                    u8 direction;       /**< In: Pull or Push message */
+                    char payload;      /**< In: Metadata implementation specific serialized data of size 'sizePayload' */
+                } in;
+                struct {
+                    u32 returnDetail;   /**< Out: Success or error code */
+                } out;
+            } inOrOut __attribute__ (( aligned(8) ));
+        } PD_MSG_STRUCT_NAME(PD_MSG_METADATA_COMM);
 
         struct {
             union {
@@ -809,6 +892,7 @@ typedef struct _ocrPolicyMsg_t {
         /* Operation where schedulers transact a scheduler object (scheduler-scheduler operation) */
         struct {
             ocrSchedulerOpTransactArgs_t schedArgs;        /**< In/Out: Arguments for the scheduler transact operation */
+            u64 size;                                      /**< In/Out: Size of transacted object */
             union {
                 struct {
                     u32 properties;                         /**< In: properties for the op */
@@ -881,6 +965,10 @@ typedef struct _ocrPolicyMsg_t {
                     ocrFatGuid_t waiter;   /**< In: Waiter to register */
                     ocrFatGuid_t dest;     /**< In: Object to register the waiter on */
                     u32 slot;              /**< In: The slot on waiter that will be notified */
+#ifdef REG_ASYNC_SGL
+                    ocrDbAccessMode_t mode; /**< In: Caching the mode the destination should use when
+                                                     it will get satisfied */
+#endif
                     u32 properties;        /**< In: Properties */
                 } in;
                 struct {
@@ -898,6 +986,9 @@ typedef struct _ocrPolicyMsg_t {
                                            * event/task with (a DB usually). */
                     ocrFatGuid_t currentEdt;   /**< In: EDT that is satisfying dep */
                     u32 slot;             /**< In: Slot to satisfy the event/task on */
+#ifdef REG_ASYNC_SGL
+                    ocrDbAccessMode_t mode;
+#endif
                     u32 properties;       /**< In: Properties for the satisfaction */
                 } in;
                 struct {
@@ -1031,7 +1122,7 @@ typedef struct _ocrPolicyMsg_t {
                                                  - RL_BRING_UP
                                                  - RL_TEAR_DOWN
                                             */
-                    u32 errorCode;          /**< In switch from RL_USER, used to capture
+                    u8 errorCode;           /**< In switch from RL_USER, used to capture
                                                error code */
                 } in;
                 struct {
@@ -1080,7 +1171,7 @@ typedef struct _ocrPolicyMsg_t {
             union {
                 struct {
                     ocrFatGuid_t guid;      /**< In: Target guid to set hints on */
-                    ocrHint_t hint;         /**< In: Hint to set */
+                    ocrHint_t *hint;        /**< In: Hint to set */
                 } in;
                 struct {
                     u32 returnDetail;       /**< Out: Success or error code */
@@ -1089,7 +1180,7 @@ typedef struct _ocrPolicyMsg_t {
         } PD_MSG_STRUCT_NAME(PD_MSG_HINT_SET);
 
         struct {
-            ocrHint_t hint;                 /**< InOut: Hints retrieved from guid */
+            ocrHint_t *hint;                /**< InOut: Hints retrieved from guid */
             union {
                 struct {
                     ocrFatGuid_t guid;      /**< In: Guid from which hints are retrieved */
@@ -1099,8 +1190,43 @@ typedef struct _ocrPolicyMsg_t {
                 } out;
             } inOrOut __attribute__ (( aligned(8) ));
         } PD_MSG_STRUCT_NAME(PD_MSG_HINT_GET);
+
+        struct {
+            union {
+                struct {
+                    u32 properties;             /**< In Properties for fault notification */
+                    ocrFaultArgs_t faultArgs;   /**< Fault related data */
+                } in;
+                struct {
+                    u32 returnDetail;           /**< Out: Success or error code */
+                } out;
+            } inOrOut __attribute__ (( aligned(8) ));
+        } PD_MSG_STRUCT_NAME(PD_MSG_RESILIENCY_NOTIFY);
+
+        struct {
+            union {
+                struct {
+                    u32 properties;             /**< In Properties for proactive fault monitoring */
+                } in;
+                struct {
+                    u32 returnDetail;           /**< Out: Success or error code */
+                    ocrFaultArgs_t faultArgs;   /**< Fault related data */
+                } out;
+            } inOrOut __attribute__ (( aligned(8) ));
+        } PD_MSG_STRUCT_NAME(PD_MSG_RESILIENCY_MONITOR);
+
+        struct {
+            union {
+                struct {
+                    u32 properties;             /**< In Properties for proactive fault monitoring */
+                } in;
+                struct {
+                    u32 returnDetail;           /**< Out: Success or error code */
+                } out;
+            } inOrOut __attribute__ (( aligned(8) ));
+        } PD_MSG_STRUCT_NAME(PD_MSG_RESILIENCY_CHECKPOINT);
+
     } args;
-    char _padding[64]; // REC: HACK to be able to fit everything in messages!!
 } ocrPolicyMsg_t;
 
 /**
@@ -1181,6 +1307,25 @@ typedef struct _ocrPolicyDomainFcts_t {
                          u8 isBlocking);
 
     /**
+     * @brief Micro-tasks version of processMessage
+     *
+     * This function can be called either by user code (for when the user code
+     * requires runtime services) or internally by the runtime (when a message
+     * has been received from another policy domain for example)
+     *
+     *
+     * @param[in]     self       This policy domain
+     * @param[in/out] evt        Input event which contains the message
+     *                           to process. On output, will contain the
+     *                           response in an event. This event may not be ready
+     * @param[in]     idx        Position in the code to resume at (if the code
+     *                           was interrupted due to a blocking call. Should be
+     *                           0 for a direct initial call.
+     * @return 0 on success and a non-zero value on failure
+     */
+    u8 (*processEvent)(struct _ocrPolicyDomain_t *self,
+                       struct _pdEvent_t** evt, u32 idx);
+    /**
      * @brief Send a message outside of the policy domain.
      * This API can be used by any client of the policy domain and
      * will call into the correct comm-api sendMessage to actually
@@ -1223,6 +1368,61 @@ typedef struct _ocrPolicyDomainFcts_t {
     u8 (*waitMessage)(struct _ocrPolicyDomain_t *self, ocrMsgHandle_t **handle);
 
     /**
+     * @brief MT compatible send a message outside of the policy domain.
+     *
+     * This API can be used by any client of the policy domain and
+     * will call into the correct comm-platform sendMessage to actually
+     * send the message.
+     *
+     * See ocr-comm-platform.h for a detailed description
+     * @param[in] self          This policy-domain
+     * @param[in/out] inOutEvent Event to send; if the message requires a
+     *                          response, the response will be contained in
+     *                          the resulting event (the event may not be ready
+     *                          on return)
+     * @param[out] statusEvent  If needed, will return an event to poll on the status
+     *                          of the send of the message
+     * @param[in] idx           Position in the code to resume at (should be
+     *                          0 for an initial direct call)
+     * @return 0 on success and a non-zero error code
+     */
+    u8 (*sendMessageMT)(struct _ocrPolicyDomain_t* self, struct _pdEvent_t **inOutEvent,
+                        struct _pdEvent_t *statusEvent, u32 idx);
+
+    /**
+     * @brief MT Non-blocking check for incoming messages that are
+     * not responses to previously sent queries
+     *
+     * This API can be used by any client of the policy domain and
+     * will call into the correct comm-platform pollMessage to actually
+     * poll for a message.
+     *
+     * See ocr-comm-platform.h for a detailed description
+     * @param[in] self          This policy-domain
+     * @param[in/out] outEvent  Event containing message
+     * @param[in] idx           Should always be 0
+     * @return 0 on success and a non-zero error code
+     */
+    u8 (*pollMessageMT)(struct _ocrPolicyDomain_t *self, struct _pdEvent_t **outEvent, u32 idx);
+
+    /**
+     * @brief MT Blocking check for incoming messages that are
+     * not responses to previously sent queries
+     *
+     * This API can be used by any client of the policy domain and
+     * will call into the correct comm-platform pollMessage to actually
+     * poll for a message.
+     *
+     * See ocr-comm-platform.h for a detailed description
+     * @param[in] self          This policy-domain
+     * @param[in/out] outEvent  Event containing message
+     * @param[in] idx           Should always be 0
+     * @return 0 on success and a non-zero error code
+     */
+    u8 (*waitMessageMT)(struct _ocrPolicyDomain_t *self, struct _pdEvent_t **outEvent, u32 idx);
+
+
+    /**
      * @brief Policy-domain only allocation.
      *
      * Memory allocated with this call can only be used within the
@@ -1247,6 +1447,9 @@ typedef struct _ocrPolicyDomainFcts_t {
     ocrStats_t* (*getStats)(struct _ocrPolicyDomain_t *self);
 #endif
 } ocrPolicyDomainFcts_t;
+
+// Forward declaration of the strand tables
+struct _pdStrandTable_t;
 
 /**
  * @brief A policy domain is OCR's way of dividing up the runtime in scalable
@@ -1283,7 +1486,7 @@ typedef struct _ocrPolicyDomainFcts_t {
 typedef struct _ocrPolicyDomain_t {
 
 // Any changes to this struct may cause problems in the symbolic constants inside
-// rmd-bin-files.h (build/tg-xe or build/tg-ce). To minimize problems, put factory first.
+// tg-bin-files.h (build/tg-xe or build/tg-ce). To minimize problems, put factory first.
 // (The factory in turn contains the pointers to the switchRunlevel functions, which is the relevant
 // data for needing careful placement.
 // See also xe-policy.h for a third magicly placed value, packedArgsLocation).
@@ -1301,12 +1504,16 @@ typedef struct _ocrPolicyDomain_t {
     /* Capable modules */
     u64 workerCount;                            /**< Number of workers */
 
-
     /* Factories */
-    u64 taskFactoryCount;                       /**< Number of task factories */
-    u64 taskTemplateFactoryCount;               /**< Number of task-template factories */
-    u64 dbFactoryCount;                         /**< Number of data-block factories */
-    u64 eventFactoryCount;                      /**< Number of event factories */
+    u64 factoryCount;                           /**< Number of factories (all types) */
+    ocrObjectFactory_t **factories;             /**< Factories (all types) */
+    // WARNING: Index order must match that in ocr-machine.h in type_enum
+    u32 taskFactoryIdx;                         /**< First index of task factories */
+    u32 taskTemplateFactoryIdx;                 /**< First index of task template factories */
+    u32 datablockFactoryIdx;                    /**< First index of datablock factories */
+    u32 eventFactoryIdx;                        /**< First index of event factories */
+
+
     u64 schedulerObjectFactoryCount;            /**< Number of schedulerObject factories */
 
     /* Objects based on counts above */
@@ -1317,18 +1524,16 @@ typedef struct _ocrPolicyDomain_t {
 
     ocrWorker_t     ** workers;                 /**< All the workers */
 
-    ocrTaskFactory_t  **taskFactories;          /**< Factory to produce tasks
-                                                 * (EDTs) */
-    ocrTaskTemplateFactory_t  ** taskTemplateFactories; /**< Factories to produce
-                                                         * task templates */
-    ocrDataBlockFactory_t ** dbFactories;       /**< Factories to produce
-                                                 * data-blocks */
-    ocrEventFactory_t ** eventFactories;        /**< Factories to produce events*/
     ocrSchedulerObjectFactory_t **schedulerObjectFactories; /**< All the schedulerObject factories
                                                  * known to this policy domain */
 
-    ocrPlacer_t * placer;                       /**< Affinity and placement
-                                                 * (work in progress) */
+    ocrPlacer_t * placer;                       //BUG #476 - This code is being deprecated
+
+    ocrPlatformModel_t * platformModel;         /**< Platform model (WIP) */
+
+    struct _pdStrandTable_t* strandTables[2];
+
+    Queue_t* taskPerfs;                        /**< Table maintaining performance statistics of each EDT */
 
     /**
      * @brief Two dimensional array:
@@ -1354,18 +1559,13 @@ typedef struct _ocrPolicyDomain_t {
      */
     s8 phasesPerRunlevel[RL_MAX][RL_PHASE_MAX];
 
-    // BUG #612: Clean up scheduler interface
-    ocrCost_t *costFunction; /**< Cost function used to determine
-                              * what to schedule/steal/take/etc.
-                              * Currently a placeholder for future
-                              * objective driven scheduling */
     ocrLocation_t myLocation;
     ocrLocation_t parentLocation;
     ocrLocation_t * neighbors;                  /**< Array of neighbor locations */
     u32 neighborCount;                          /**< Number of neighboring policy domains */
     u8 shutdownCode;
 
-    // BUG #135 and BUG #605: Location support
+    // BUG #605: Location support
     struct _ocrPolicyDomain_t **neighborPDs;
     struct _ocrPolicyDomain_t *parentPD;
 
@@ -1409,19 +1609,18 @@ typedef struct _ocrPolicyDomainFactory_t {
      * @param lockFactory         The factory to use to generate locks
      * @param atomicFactory       The factory to use to generate atomics
      * @param queueFactory        The factory to use to generate queues
-     * @param costFunction        The cost function used by this policy domain
      */
 
     ocrPolicyDomain_t * (*instantiate) (struct _ocrPolicyDomainFactory_t *factory,
 #ifdef OCR_ENABLE_STATISTICS
                                         ocrStats_t *statsObject,
 #endif
-                                        ocrCost_t *costFunction, ocrParamList_t *perInstance);
+                                        ocrParamList_t *perInstance);
     void (*initialize) (struct _ocrPolicyDomainFactory_t *factory, ocrPolicyDomain_t* self,
 #ifdef OCR_ENABLE_STATISTICS
                         ocrStats_t *statsObject,
 #endif
-                        ocrCost_t *costFunction, ocrParamList_t *perInstance);
+                        ocrParamList_t *perInstance);
     void (*destruct)(struct _ocrPolicyDomainFactory_t * factory);
     ocrPolicyDomainFcts_t policyDomainFcts;
 } ocrPolicyDomainFactory_t;
@@ -1587,6 +1786,20 @@ u8 ocrPolicyMsgMarshallMsg(struct _ocrPolicyMsg_t* msg, u64 baseSize, u8* buffer
  */
 u8 ocrPolicyMsgUnMarshallMsg(u8* mainBuffer, u8* addlBuffer,
                              struct _ocrPolicyMsg_t* msg, u32 mode);
+
+/**
+ * @brief Returns true if the GUID is owned by the policy domain
+ *
+ * @param[in] pd     The PD to test against
+ * @param[in] guid   The GUID to check for ownership
+ *
+ * @return true if local GUID
+ */
+bool isLocalGuid(ocrPolicyDomain_t *pd, ocrGuid_t guid);
+
+#ifdef ENABLE_OCR_API_DEFERRABLE
+void tagDeferredMsg(ocrPolicyMsg_t * msg, ocrTask_t * task);
+#endif
 
 #define __GUID_END_MARKER__
 #include "ocr-guid-end.h"

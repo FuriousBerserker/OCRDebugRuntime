@@ -18,8 +18,8 @@
 #include "ocr-statistics.h"
 #endif
 
-#ifdef OCR_ENABLE_EDT_PROFILING
-#include "ocr-edt-profiling.h"
+#ifdef ENABLE_EXTENSION_PERF
+#include "ocr-perfmon.h"
 #endif
 
 #ifdef OCR_ENABLE_EDT_NAMING
@@ -27,6 +27,9 @@
 #define OCR_EDT_NAME_SIZE 32
 #endif
 #endif
+
+//Runtime defined properties for EDT create (upper 16 bits)
+#define EDT_PROP_RT_HINT_ALLOC  0x10000 //Hint variable is runtime allocated
 
 struct _ocrTask_t;
 struct _ocrTaskTemplate_t;
@@ -36,14 +39,17 @@ struct _ocrTaskTemplate_t;
 /****************************************************/
 typedef struct _paramListTaskFact_t {
     ocrParamList_t base;
-    u8 usesSchedulerObject;
 } paramListTaskFact_t;
 
 typedef struct _paramListTaskTemplateFact_t {
     ocrParamList_t base;
 } paramListTaskTemplateFact_t;
 
-struct _ocrTaskTemplate_t;
+typedef struct _paramListTask_t {
+    ocrParamList_t base;
+    ocrWorkType_t workType;
+} paramListTask_t;
+
 
 /****************************************************/
 /* OCR TASK TEMPLATE                                */
@@ -90,17 +96,62 @@ typedef struct ocrTaskTemplateFcts_t {
      * starting with the mask and followed by the
      * hint values.
      *
-     * @param[in] self        Pointer to this task
+     * @param[in] self        Pointer to this task template
      * @return pointer to hint structure
      */
     ocrRuntimeHint_t* (*getRuntimeHint)(struct _ocrTaskTemplate_t* self);
+
+#ifdef ENABLE_RESILIENCY
+    /**
+     * @brief Get the serialization size
+     *
+     * @param[in] self        Pointer to this task template
+     * @param[out] size       Buffer size required to serialize task template
+     * @return 0 on success and a non-zero code on failure
+     */
+    u8 (*getSerializationSize)(struct _ocrTaskTemplate_t* self, u64* size);
+
+    /**
+     * @brief Serialize task template into buffer
+     *
+     * @param[in] self        Pointer to this task template
+     * @param[in/out] buffer  Buffer to serialize into
+     * @return 0 on success and a non-zero code on failure
+     */
+    u8 (*serialize)(struct _ocrTaskTemplate_t* self, u8* buffer);
+
+    /**
+     * @brief Deserialize task template from buffer
+     *
+     * @param[in] buffer      Buffer to deserialize from
+     * @param[out] self       Pointer to deserialized task template
+     * @return 0 on success and a non-zero code on failure
+     */
+    u8 (*deserialize)(u8* buffer, struct _ocrTaskTemplate_t** self);
+
+    /**
+     * @brief Fixup task template pointers after deserialization
+     *
+     * @param[in] self        Pointer to this task template
+     * @return 0 on success and a non-zero code on failure
+     */
+    u8 (*fixup)(struct _ocrTaskTemplate_t* self);
+
+    /**
+     * @brief Deallocate task template during PD reset
+     *
+     * @param[in] self        Pointer to this task template
+     * @return 0 on success and a non-zero code on failure
+     */
+    u8 (*reset)(struct _ocrTaskTemplate_t* self);
+#endif
 } ocrTaskTemplateFcts_t;
 
 /** @brief Abstract class to represent OCR task templates.
  *
  */
 typedef struct _ocrTaskTemplate_t {
-    ocrGuid_t guid;         /**< GUID for this task template */
+    ocrObject_t base;
 #ifdef OCR_ENABLE_STATISTICS
     ocrStatsProcess_t *statProcess;
 #endif
@@ -113,9 +164,8 @@ typedef struct _ocrTaskTemplate_t {
 #ifdef OCR_ENABLE_EDT_NAMING
     const char name[OCR_EDT_NAME_SIZE];       /**< Name of the EDT */
 #endif
-#ifdef OCR_ENABLE_EDT_PROFILING
-    struct _profileStruct *profileData;
-    struct _dbWeightStruct *dbWeights;
+#ifdef ENABLE_EXTENSION_PERF
+    ocrPerfCounters_t *taskPerfsEntry;   /**< Entry to the PD's taskPerfs queue */
 #endif
     u32 fctId;              /**< Functions to manage this template */
 } ocrTaskTemplate_t;
@@ -125,6 +175,7 @@ typedef struct _ocrTaskTemplate_t {
 /****************************************************/
 
 typedef struct _ocrTaskTemplateFactory_t {
+    ocrObjectFactory_t base;
     /**
      * @brief Create a task template
      *
@@ -138,10 +189,6 @@ typedef struct _ocrTaskTemplateFactory_t {
     ocrTaskTemplate_t* (*instantiate)(struct _ocrTaskTemplateFactory_t * factory, ocrEdt_t fctPtr,
                                       u32 paramc, u32 depc, const char* fctName,
                                       ocrParamList_t *perInstance);
-
-    /** @brief Destructor for the TaskTemplateFactory interface
-     */
-    void (*destruct)(struct _ocrTaskTemplateFactory_t * factory);
 
     u32 factoryId;
     ocrTaskTemplateFcts_t fcts;
@@ -162,6 +209,10 @@ typedef struct _ocrTaskFcts_t {
      * @brief Virtual destructor for the Task interface
      */
     u8 (*destruct)(struct _ocrTask_t* self);
+
+#ifdef REG_ASYNC_SGL
+    u8 (*satisfyWithMode)(struct _ocrTask_t* self, ocrFatGuid_t db, u32 slot, ocrDbAccessMode_t mode);
+#endif
 
     /**
      * @brief "Satisfy" an input dependence for this EDT
@@ -309,6 +360,51 @@ typedef struct _ocrTaskFcts_t {
      * @return pointer to hint structure
      */
     ocrRuntimeHint_t* (*getRuntimeHint)(struct _ocrTask_t* self);
+
+#ifdef ENABLE_RESILIENCY
+    /**
+     * @brief Get the serialization size
+     *
+     * @param[in] self        Pointer to this task
+     * @param[out] size       Buffer size required to serialize task
+     * @return 0 on success and a non-zero code on failure
+     */
+    u8 (*getSerializationSize)(struct _ocrTask_t* self, u64* size);
+
+    /**
+     * @brief Serialize task into buffer
+     *
+     * @param[in] self        Pointer to this task
+     * @param[in/out] buffer  Buffer to serialize into
+     * @return 0 on success and a non-zero code on failure
+     */
+    u8 (*serialize)(struct _ocrTask_t* self, u8* buffer);
+
+    /**
+     * @brief Deserialize task from buffer
+     *
+     * @param[in] buffer      Buffer to deserialize from
+     * @param[out] self       Pointer to deserialized task
+     * @return 0 on success and a non-zero code on failure
+     */
+    u8 (*deserialize)(u8* buffer, struct _ocrTask_t** self);
+
+    /**
+     * @brief Fixup task pointers after deserialization
+     *
+     * @param[in] self        Pointer to this task
+     * @return 0 on success and a non-zero code on failure
+     */
+    u8 (*fixup)(struct _ocrTask_t* self);
+
+    /**
+     * @brief Deallocate task during PD reset
+     *
+     * @param[in] self        Pointer to this task
+     * @return 0 on success and a non-zero code on failure
+     */
+    u8 (*reset)(struct _ocrTask_t* self);
+#endif
 } ocrTaskFcts_t;
 
 #define ELS_RUNTIME_SIZE 0
@@ -323,6 +419,7 @@ typedef struct _ocrTaskFcts_t {
  *  OCR tasks can be executed and can have their synchronization frontier furthered by Events.
  */
 typedef struct _ocrTask_t {
+    ocrObject_t base;
     ocrGuid_t guid;         /**< GUID for this task (EDT) */
 #ifdef OCR_ENABLE_STATISTICS
     ocrStatsProcess_t *statProcess;
@@ -341,10 +438,22 @@ typedef struct _ocrTask_t {
     u32 paramc, depc;       /**< Number of parameters and dependences */
     u32 flags;              /**< Bit flags for the task */
     u32 fctId;
+#ifdef ENABLE_EXTENSION_PERF
+    ocrPerfCounters_t *taskPerfsEntry;
+    u32 swPerfCtrs[PERF_MAX-PERF_HW_MAX];
+#endif
 } ocrTask_t;
 
-#define OCR_TASK_FLAG_USES_HINTS            0x1
-#define OCR_TASK_FLAG_USES_SCHEDULER_OBJECT 0x2
+#define OCR_TASK_FLAG_USES_HINTS            0x1 /* Identifies if the task has user hints set */
+#define OCR_TASK_FLAG_RUNTIME_EDT           0x2 /* Identifies if the task is a runtime EDT as opposed to a user EDT */
+#define OCR_TASK_FLAG_USES_SCHEDULER_OBJECT 0x4 /* BUG #920 Cleanup */
+#define OCR_TASK_FLAG_USES_AFFINITY         0x8 /* BUG #921: This should go away once affinity is folded into hints */
+#ifdef ENABLE_EXTENSION_BLOCKING_SUPPORT
+#define OCR_TASK_FLAG_LONG                  0x10
+#endif
+#ifdef ENABLE_EXTENSION_PERF
+#define OCR_TASK_FLAG_PERFMON_ME            0x20 /* Identifies if perfmon needs to be carried out for this task */
+#endif
 
 /****************************************************/
 /* OCR TASK FACTORY                                 */
@@ -356,6 +465,7 @@ typedef struct _ocrTask_t {
  *  to allow runtime implementers to choose to have state in their derived TaskFactory classes.
  */
 typedef struct _ocrTaskFactory_t {
+    ocrObjectFactory_t base;
     /*! \brief Instantiates a Task and returns its corresponding GUID
      *  \param[in]  routine A user defined function that represents the computation this Task encapsulates.
      *  \param[in]  worker_id   The Worker instance creating this Task instance
@@ -368,19 +478,13 @@ typedef struct _ocrTaskFactory_t {
      */
     u8  (*instantiate)(struct _ocrTaskFactory_t * factory, ocrFatGuid_t * edtGuid, ocrFatGuid_t edtTemplate,
                               u32 paramc, u64* paramv, u32 depc, u32 properties,
-                              ocrFatGuid_t affinity, ocrFatGuid_t *outputEvent,
+                              ocrHint_t *hint, ocrFatGuid_t *outputEvent,
                               ocrTask_t *curEdt, ocrFatGuid_t parentLatch,
                               ocrParamList_t *perInstance);
-
-    /*! \brief Virtual destructor for the TaskFactory interface
-     */
-    void (*destruct)(struct _ocrTaskFactory_t * factory);
 
     ocrTaskFcts_t fcts;         /**< Function pointers created instances should use */
     u32 factoryId;              /**< Corresponds to fctId in task */
     u64 *hintPropMap;           /**< Mapping hint properties to implementation specific packed array */
-    u8 usesSchedulerObject;     /**< This flag indicates if the datablock can have
-                                     a scheduler object associated with it */
 } ocrTaskFactory_t;
 
 #endif /* __OCR_TASK_H__ */

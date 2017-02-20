@@ -7,23 +7,36 @@
 #
 
 ifndef OCR_TYPE
-OCR_TYPE=tg-ce
+  OCR_TYPE=tg-ce
 else
-ifneq (${OCR_TYPE}, tg-ce)
-$(error OCR_TYPE is set to ${OCR_TYPE} but expected tg-ce)
-endif
+  ifneq (${OCR_TYPE}, tg-ce)
+    $(error OCR_TYPE is set to ${OCR_TYPE} but expected tg-ce)
+  endif
 endif
 #
 # Tool-chain to be used for the build
 #
 
-TG_INSTALL ?= ../../../../intel/ss/install
+TG_INSTALL ?= ../../../../tg/tg/install
+
+# Check that this path exists
+_T := $(TG_INSTALL)
+TG_INSTALL := $(realpath $(_T))
+ifeq (,$(TG_INSTALL))
+$(error TG_INSTALL is not a valid path: $(_T))
+endif
 
 DEFAULT_CONFIG = ce-default.cfg
 
+FORCE_CC ?= no
+ifeq ($(FORCE_CC), no)
+  ifeq ($(CC), cc)
+    CC = gcc
+  endif
+endif # End of ifeq force_cc
 
-CC      := gcc
-CFLAGS  := -fno-builtin -fno-stack-protector -Wno-unused-local-typedefs -I $(TG_INSTALL)/include
+CFLAGS  := -m64 -mcmodel=large -fno-builtin -fno-stack-protector -Wno-unused-local-typedefs \
+		-I${TG_INSTALL}/include
 
 RM      := rm
 RMFLAGS := -rf

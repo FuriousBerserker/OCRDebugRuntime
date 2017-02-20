@@ -16,6 +16,7 @@
 
 #include "ocr-allocator.h"
 #include "ocr-datablock.h"
+#include "ocr-hal.h"
 #include "ocr-types.h"
 #include "utils/ocr-utils.h"
 #include "ocr-worker.h"
@@ -33,12 +34,13 @@ typedef struct {
 
 typedef union {
     struct {
-        volatile u64 flags : 16;
-        volatile u64 numUsers : 15;
-        volatile u64 internalUsers : 15;
-        volatile u64 freeRequested: 1;
-        volatile u64 modeLock : 2;
-        volatile u64 _padding : 1;
+        u64 flags : 16;
+        u64 numUsers : 15;
+        u64 internalUsers : 15;
+        u64 freeRequested: 1;
+        u64 modeLock : 2;
+        u64 singleAssign : 1;
+        u64 _padding : 13;
     };
     u64 data;
 } ocrDataBlockLockableAttr_t;
@@ -50,7 +52,7 @@ typedef struct _ocrDataBlockLockable_t {
     ocrDataBlock_t base;
 
     /* Data for the data-block */
-    u32 lock; /**< Lock for this data-block */
+    lock_t lock; /**< Lock for this data-block */
     ocrDataBlockLockableAttr_t attributes; /**< Attributes for this data-block */
 
     struct _dbWaiter_t * ewWaiterList;  /**< EDTs waiting for exclusive write access */
@@ -59,6 +61,9 @@ typedef struct _ocrDataBlockLockable_t {
     ocrLocation_t itwLocation;
     ocrWorker_t * worker; /**< worker currently owning the DB internal lock */
     ocrRuntimeHint_t hint;
+#ifdef ENABLE_RESILIENCY
+    u32 ewWaiterCount, itwWaiterCount, roWaiterCount;
+#endif
 } ocrDataBlockLockable_t;
 
 extern ocrDataBlockFactory_t* newDataBlockFactoryLockable(ocrParamList_t *perType, u32 factoryId);

@@ -38,16 +38,21 @@ ocrGuid_t hcDumpNextEdt(ocrWorker_t *worker, u32 *size){
     wstObj = (ocrSchedulerObjectWst_t *)schedObj;
     deqObj = (ocrSchedulerObjectDeq_t *)wstObj->deques[worker->id];
 
-    u32 head = (deqObj->deque->head%INIT_DEQUE_CAPACITY);
     u32 tail = (deqObj->deque->tail%INIT_DEQUE_CAPACITY);
-    u32 deqSize = tail-head;
+    u32 deqSize = deqObj->deque->size(deqObj->deque);
 
     if(deqSize > 0){
 
         PD_MSG_STACK(msg);
         getCurrentEnv(NULL, NULL, NULL, &msg);
         ocrFatGuid_t fguid;
-        fguid.guid = (ocrGuid_t)deqObj->deque->data[tail-1];
+        // See BUG #928 on GUIDs
+#if GUID_BIT_COUNT == 64
+        fguid.guid.guid = (u64)deqObj->deque->data[tail-1];
+#elif GUID_BIT_COUNT == 128
+        fguid.guid.lower = (u64)deqObj->deque->data[tail-1];
+        fguid.guid.upper = 0x0;
+#endif
         fguid.metaDataPtr = NULL;
 
     #define PD_MSG (&msg)
@@ -56,7 +61,7 @@ ocrGuid_t hcDumpNextEdt(ocrWorker_t *worker, u32 *size){
         PD_MSG_FIELD_IO(guid.guid) = fguid.guid;
         PD_MSG_FIELD_IO(guid.metaDataPtr) = fguid.metaDataPtr;
         PD_MSG_FIELD_I(properties) = RMETA_GUIDPROP | KIND_GUIDPROP;
-        RESULT_PROPAGATE(pd->fcts.processMessage(pd, &msg, true));
+        u8 returnCode __attribute__((unused)) = pd->fcts.processMessage(pd, &msg, true);
         ocrGuidKind msgKind = PD_MSG_FIELD_O(kind);
         curTask = (ocrTask_t *)PD_MSG_FIELD_IO(guid.metaDataPtr);
     #undef PD_MSG
@@ -88,7 +93,7 @@ ocrGuid_t hcQueryNextEdts(ocrPolicyDomainHc_t *rself, void **result, u32 *qSize)
     ocrGuid_t dataDb;
 
     ocrDbCreate(&dataDb, (void **)&deqGuids, sizeof(ocrGuid_t)*(rself->base.workerCount),
-                0, NULL_GUID, NO_ALLOC);
+                DB_PROP_RUNTIME, NULL_HINT, NO_ALLOC);
 
     for(i = 0; i < rself->base.workerCount; i++){
         u32 wrkrSize;
@@ -129,7 +134,7 @@ ocrGuid_t hcQueryAllEdts(ocrPolicyDomainHc_t *rself, void **result, u32 *qsize){
     u32 idxOffset = -1;
 
     ocrDbCreate(&dataDb, (void **)&deqGuids, sizeof(ocrGuid_t)*(dataBlockSize),
-                0, NULL_GUID, NO_ALLOC);
+                DB_PROP_RUNTIME, NULL_HINT, NO_ALLOC);
 
     //Populate datablock with workpile EDTs.
     for(i = 0; i < rself->base.workerCount; i++){
@@ -149,7 +154,12 @@ ocrGuid_t hcQueryAllEdts(ocrPolicyDomainHc_t *rself, void **result, u32 *qsize){
                 PD_MSG_STACK(msg);
                 getCurrentEnv(NULL, NULL, NULL, &msg);
                 ocrFatGuid_t fguid;
-                fguid.guid = (ocrGuid_t)deqObj->deque->data[j];
+#if GUID_BIT_COUNT == 64
+                fguid.guid.guid = (u64)deqObj->deque->data[j];
+#elif GUID_BIT_COUNT == 128
+                fguid.guid.lower = (u64)deqObj->deque->data[j];
+                fguid.guid.upper = 0x0;
+#endif
                 fguid.metaDataPtr = NULL;
 
             #define PD_MSG (&msg)
@@ -158,7 +168,7 @@ ocrGuid_t hcQueryAllEdts(ocrPolicyDomainHc_t *rself, void **result, u32 *qsize){
                 PD_MSG_FIELD_IO(guid.guid) = fguid.guid;
                 PD_MSG_FIELD_IO(guid.metaDataPtr) = fguid.metaDataPtr;
                 PD_MSG_FIELD_I(properties) = RMETA_GUIDPROP | KIND_GUIDPROP;
-                RESULT_PROPAGATE(pd->fcts.processMessage(pd, &msg, true));
+                u8 returnCode __attribute__((unused)) = pd->fcts.processMessage(pd, &msg, true);
                 ocrGuidKind msgKind = PD_MSG_FIELD_O(kind);
                 ocrTask_t *curTask = (ocrTask_t *)PD_MSG_FIELD_IO(guid.metaDataPtr);
             #undef PD_MSG
@@ -184,7 +194,8 @@ ocrGuid_t hcQueryPreviousDatablock(ocrPolicyDomainHc_t *self, void **result, u32
     ocrGuid_t *prevDb;
     ocrGuid_t dataDb;
 
-    ocrDbCreate(&dataDb, (void **)&prevDb, sizeof(ocrGuid_t), 0, NULL_GUID, NO_ALLOC);
+    ocrDbCreate(&dataDb, (void **)&prevDb, sizeof(ocrGuid_t),
+                DB_PROP_RUNTIME, NULL_HINT, NO_ALLOC);
     prevDb[0] = self->pqrFlags.prevDb;
 
     *qSize = 1;

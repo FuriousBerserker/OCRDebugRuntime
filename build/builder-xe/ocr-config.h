@@ -37,12 +37,6 @@
 // Comp-target
 #define ENABLE_COMP_TARGET_PASSTHROUGH
 
-// Scheduler Objects
-#define ENABLE_SCHEDULER_OBJECT_NULL
-
-// Scheduler Heuristic
-#define ENABLE_SCHEDULER_HEURISTIC_NULL
-
 // Datablock
 #define ENABLE_DATABLOCK_REGULAR
 #define ENABLE_DATABLOCK_LOCKABLE
@@ -56,6 +50,7 @@
 
 // GUID provider
 #define ENABLE_GUID_PTR
+#define ENABLE_GUID_LABELED
 
 // Hints
 #define ENABLE_HINTS
@@ -75,6 +70,12 @@
 // Scheduler
 #define ENABLE_SCHEDULER_XE
 
+// Scheduler Heuristic
+#define ENABLE_SCHEDULER_HEURISTIC_NULL
+
+// Scheduler Objects
+#define ENABLE_SCHEDULER_OBJECT_NULL
+
 // SAL layer to use
 #define SAL_LINUX
 
@@ -93,10 +94,27 @@
 // Workpile
 #define ENABLE_WORKPILE_XE
 
+// Extensions
+#define ENABLE_EXTENSION_LABELING
 // Build OCR legacy support
 //#define ENABLE_EXTENSION_LEGACY
 
 // Build pause/resume support
 //#define ENABLE_EXTENSION_PAUSE
+
+// Event creation with parameter
+#define ENABLE_EXTENSION_PARAMS_EVT
+
+//Counted Events support
+#define ENABLE_EXTENSION_COUNTED_EVT
+
+//Channel Events support
+#define ENABLE_EXTENSION_CHANNEL_EVT
+
+// Performance monitoring
+//#define ENABLE_EXTENSION_PERF
+
+// Affinity (no-op for now)
+#define ENABLE_EXTENSION_AFFINITY
 
 #endif /* __OCR_CONFIG_H__ */
