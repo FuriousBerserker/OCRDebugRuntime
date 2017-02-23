@@ -12,6 +12,8 @@
 
 #define DEBUG_TYPE API
 
+#include "ocr-instrument.h"
+
 static void ocrShutdownInternal(u8 errorCode) {
     DPRINTF(DEBUG_LVL_INFO, "ENTER ocrShutdown()\n");
     ocrPolicyDomain_t *pd = NULL;
@@ -39,6 +41,7 @@ static void ocrShutdownInternal(u8 errorCode) {
 void ocrShutdown() {
     START_PROFILE(api_ocrShutdown);
     ocrShutdownInternal(0);
+    notifyShutdown();
     RETURN_PROFILE();
 }
 

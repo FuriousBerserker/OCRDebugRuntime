@@ -23,6 +23,8 @@
 
 #include "utils/profiler/profiler.h"
 
+#include "ocr-instrument.h"
+
 #define DEBUG_TYPE API
 
 u8 ocrDbCreate(ocrGuid_t *db, void** addr, u64 len, u16 flags,
@@ -121,6 +123,9 @@ u8 ocrDbCreate(ocrGuid_t *db, void** addr, u64 len, u16 flags,
     DPRINTF_COND_LVL(((returnCode != 0) && (returnCode != OCR_EGUIDEXISTS)), DEBUG_LVL_WARN, DEBUG_LVL_INFO,
                      "EXIT ocrDbCreate -> %"PRIu32"; GUID: "GUIDF"; ADDR: %p size: %"PRIu64"\n",
                      returnCode, GUIDA(*db), *addr, len);
+
+    notifyDbCreate(*db, *addr, len, flags, allocator);
+
     RETURN_PROFILE(returnCode);
 }
 

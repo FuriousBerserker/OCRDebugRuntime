@@ -13,6 +13,8 @@
 
 #include "utils/profiler/profiler.h"
 
+#include "ocr-instrument.h"
+
 #define DEBUG_TYPE API
 
 u8 ocrEventCreateParams(ocrGuid_t *guid, ocrEventTypes_t eventType, u16 properties, ocrEventParams_t * params) {
@@ -68,6 +70,8 @@ u8 ocrEventCreateParams(ocrGuid_t *guid, ocrEventTypes_t eventType, u16 properti
                      "EXIT ocrEventCreateParams -> %"PRIu32"; GUID: "GUIDF"\n", returnCode, GUIDA(*guid));
     if(returnCode == 0)
         OCR_TOOL_TRACE(true, OCR_TRACE_TYPE_EVENT, OCR_ACTION_CREATE, traceEventCreate, *guid);
+
+    notifyEventCreate(*guid, eventType, properties);
 
     RETURN_PROFILE(returnCode);
 
@@ -139,6 +143,12 @@ u8 ocrEventSatisfySlot(ocrGuid_t eventGuid, ocrGuid_t dataGuid /*= INVALID_GUID*
     DPRINTF_COND_LVL(returnCode, DEBUG_LVL_WARN, DEBUG_LVL_INFO,
                     "EXIT ocrEventSatisfySlot(evt="GUIDF") -> %"PRIu32"\n", GUIDA(eventGuid), returnCode);
     OCR_TOOL_TRACE(true, OCR_TRACE_TYPE_EVENT, OCR_ACTION_SATISFY, traceEventSatisfyDependence, eventGuid, dataGuid);
+
+    ocrGuid_t currentGuid;
+    currentEdtUserGet(&currentGuid);
+    _ocrAssert(currentGuid.guid != NULL_GUID.guid, "guid cannot be null", "", 0);
+    notifyEventSatisfy(currentGuid, eventGuid, dataGuid, slot);
+
     RETURN_PROFILE(returnCode);
 #undef PD_MSG
 #undef PD_TYPE
@@ -420,6 +430,9 @@ u8 ocrEdtCreate(ocrGuid_t* edtGuidPtr, ocrGuid_t templateGuid,
     } else {
         DPRINTF(DEBUG_LVL_INFO, "EXIT ocrEdtCreate -> %"PRIu32"; GUID: "GUIDF"\n", returnCode, GUIDA(edtGuid));
     }
+
+    notifyEdtCreate(*edtGuidPtr, templateGuid, paramc, paramv, depc, depv, properties, outputEvent ? *outputEvent : NULL_GUID);
+
     RETURN_PROFILE(0);
 #undef PD_MSG
 #undef PD_TYPE
@@ -540,5 +553,8 @@ u8 ocrAddDependence(ocrGuid_t source, ocrGuid_t destination, u32 slot,
 #endif
     DPRINTF_COND_LVL(returnCode, DEBUG_LVL_WARN, DEBUG_LVL_INFO,
                      "EXIT ocrAddDependence(src="GUIDF", dest="GUIDF") -> %"PRIu32"\n", GUIDA(source), GUIDA(destination), returnCode);
+
+    notifyAddDependence(source, destination, slot, mode);
+
     RETURN_PROFILE(returnCode);
 }
