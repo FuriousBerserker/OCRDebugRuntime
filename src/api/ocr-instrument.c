@@ -27,3 +27,7 @@ void notifyEventSatisfy(ocrGuid_t edtGuid, ocrGuid_t eventGuid, ocrGuid_t dataGu
 void notifyShutdown() {
 
 }
+
+void notifyEdtStart(ocrGuid_t edtGuid) {
+
+}

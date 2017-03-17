@@ -38,6 +38,7 @@
 
 #include "utils/profiler/profiler.h"
 
+#include "ocr-instrument.h"
 #define DEBUG_TYPE TASK
 
 /***********************************************************/
@@ -1908,7 +1909,10 @@ u8 taskExecute(ocrTask_t* base) {
         }
 #else
         START_PROFILE(userCode);
+
+        notifyEdtStart(base->guid);
         retGuid = base->funcPtr(paramc, paramv, depc, depv);
+        
         EXIT_PROFILE;
 #endif /* ENABLE_POLICY_DOMAIN_HC_DIST */
 #ifdef OCR_ENABLE_EDT_NAMING
