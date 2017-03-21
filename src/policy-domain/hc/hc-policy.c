@@ -43,6 +43,8 @@
 // Currently required to find out if self is the blessed PD
 #include "extensions/ocr-affinity.h"
 
+#include "ocr-instrument.h"
+
 #define DEBUG_TYPE POLICY
 
 extern ocrObjectFactory_t * resolveObjectFactory(ocrPolicyDomain_t *pd, ocrGuidKind kind);
@@ -2368,7 +2370,7 @@ u8 hcPolicyDomainProcessMessage(ocrPolicyDomain_t *self, ocrPolicyMsg_t *msg, u8
 #ifdef ENABLE_EXTENSION_BLOCKING_SUPPORT
         }
 #endif
-
+        notifyEventCreate(PD_MSG_FIELD_IO(guid.guid), PD_MSG_FIELD_I(type), PD_MSG_FIELD_I(properties));
 #undef PD_MSG
 #undef PD_TYPE
         EXIT_PROFILE;

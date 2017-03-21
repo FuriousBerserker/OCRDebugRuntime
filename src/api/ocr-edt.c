@@ -71,7 +71,7 @@ u8 ocrEventCreateParams(ocrGuid_t *guid, ocrEventTypes_t eventType, u16 properti
     if(returnCode == 0)
         OCR_TOOL_TRACE(true, OCR_TRACE_TYPE_EVENT, OCR_ACTION_CREATE, traceEventCreate, *guid);
 
-    notifyEventCreate(*guid, eventType, properties);
+//    notifyEventCreate(*guid, eventType, properties);
 
     RETURN_PROFILE(returnCode);
 
@@ -432,7 +432,9 @@ u8 ocrEdtCreate(ocrGuid_t* edtGuidPtr, ocrGuid_t templateGuid,
     }
 
     notifyEdtCreate(*edtGuidPtr, templateGuid, paramc, paramv, depc, depv, properties, outputEvent ? *outputEvent : NULL_GUID);
-
+    if (!ocrGuidIsNull(PD_MSG_FIELD_I(parentLatch.guid))) {
+        notifyAddDependence(*edtGuidPtr, PD_MSG_FIELD_I(parentLatch.guid), OCR_EVENT_LATCH_DECR_SLOT, DB_MODE_CONST);
+    }
     RETURN_PROFILE(0);
 #undef PD_MSG
 #undef PD_TYPE

@@ -1814,6 +1814,7 @@ u8 taskExecute(ocrTask_t* base) {
 #endif
                 ocrFatGuid_t parentLatchFGuid = {.guid = base->parentLatch, .metaDataPtr = NULL};
                 doAddDep(pd, &msg, currentEdt, newFinishLatchFGuid, parentLatchFGuid, OCR_EVENT_LATCH_DECR_SLOT);
+                notifyAddDependence(newFinishLatchFGuid.guid, parentLatchFGuid.guid, OCR_EVENT_LATCH_DECR_SLOT, DB_MODE_CONST);
             }
             if (hasFinish) {
                 // Now that we've setup everything, if we're defining a new finish scope,
@@ -1827,6 +1828,7 @@ u8 taskExecute(ocrTask_t* base) {
                     getCurrentEnv(NULL, NULL, NULL, &msg);
                     ocrFatGuid_t outputEventFGuid = {.guid = base->outputEvent, .metaDataPtr = NULL};
                     doAddDep(pd, &msg, currentEdt, newFinishLatchFGuid, outputEventFGuid, 0);
+                    notifyAddDependence(newFinishLatchFGuid.guid, outputEventFGuid.guid, OCR_EVENT_LATCH_DECR_SLOT, DB_MODE_CONST);
                 }
             }
         }
