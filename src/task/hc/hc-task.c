@@ -39,6 +39,7 @@
 #include "utils/profiler/profiler.h"
 
 #include "ocr-instrument.h"
+#include "ocr-db.h"
 #define DEBUG_TYPE TASK
 
 /***********************************************************/
@@ -1912,7 +1913,16 @@ u8 taskExecute(ocrTask_t* base) {
 #else
         START_PROFILE(userCode);
 
-        notifyEdtStart(base->guid);
+        u64 dbSizev[depc];
+        u32 i;
+        for (i = 0; i < depc; i++) {
+            if (depv[i].ptr) {
+                ocrDbGetSize(depv[i].guid, &dbSizev[i]);
+            } else {
+                dbSizev[i] = 0;
+            }
+        }
+        notifyEdtStart(base->guid, paramc, paramv, depc, depv, dbSizev);
         retGuid = base->funcPtr(paramc, paramv, depc, depv);
         
         EXIT_PROFILE;

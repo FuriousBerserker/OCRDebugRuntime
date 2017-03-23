@@ -28,6 +28,6 @@ void notifyShutdown() {
 
 }
 
-void notifyEdtStart(ocrGuid_t edtGuid) {
+void notifyEdtStart(ocrGuid_t edtGuid, u32 paramc, u64* paramv, u32 depc, ocrEdtDep_t depv[], u64* dbSizev) {
 
 }
