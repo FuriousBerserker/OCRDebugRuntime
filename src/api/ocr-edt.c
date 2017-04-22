@@ -259,6 +259,7 @@ u8 ocrEdtCreate(ocrGuid_t* edtGuidPtr, ocrGuid_t templateGuid,
     u8 returnCode = 0;
     ocrTask_t * curEdt = NULL;
     getCurrentEnv(&pd, NULL, &curEdt, &msg);
+
     if((paramc == EDT_PARAM_UNK) || (depc == EDT_PARAM_UNK)) {
         DPRINTF(DEBUG_LVL_WARN, "error: paramc or depc cannot be set to EDT_PARAM_UNK\n");
         ASSERT(false);
@@ -397,7 +398,7 @@ u8 ocrEdtCreate(ocrGuid_t* edtGuidPtr, ocrGuid_t templateGuid,
     depc = PD_MSG_FIELD_IO(depc);
 
 
-
+    notifyEdtCreate(*edtGuidPtr, templateGuid, paramc, paramv, depc, depv, properties, outputEvent ? *outputEvent : NULL_GUID, curEdt ? curEdt->guid : NULL_GUID);
 #ifndef EDT_DEPV_DELAYED
     // We still need to do that in case depc was EDT_PARAM_DEF
     // and the actual number of dependences was unknown then.
@@ -431,7 +432,6 @@ u8 ocrEdtCreate(ocrGuid_t* edtGuidPtr, ocrGuid_t templateGuid,
         DPRINTF(DEBUG_LVL_INFO, "EXIT ocrEdtCreate -> %"PRIu32"; GUID: "GUIDF"\n", returnCode, GUIDA(edtGuid));
     }
 
-    notifyEdtCreate(*edtGuidPtr, templateGuid, paramc, paramv, depc, depv, properties, outputEvent ? *outputEvent : NULL_GUID);
     if (!ocrGuidIsNull(PD_MSG_FIELD_I(parentLatch.guid))) {
         notifyAddDependence(*edtGuidPtr, PD_MSG_FIELD_I(parentLatch.guid), OCR_EVENT_LATCH_DECR_SLOT, DB_MODE_CONST);
     }

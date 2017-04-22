@@ -21,7 +21,7 @@ extern "C" {
 
 void notifyEdtCreate(ocrGuid_t guid, ocrGuid_t templateGuid,
                 u32 paramc, u64* paramv, u32 depc, ocrGuid_t *depv,
-                u16 properties, ocrGuid_t outputEvent);
+                u16 properties, ocrGuid_t outputEvent, ocrGuid_t parent);
 
 void notifyDbCreate(ocrGuid_t guid, void* addr, u64 len, u16 flags,
                ocrInDbAllocator_t allocator);

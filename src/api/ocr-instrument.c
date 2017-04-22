@@ -1,8 +1,8 @@
 #include "ocr-instrument.h"
-
+//#include "stdlib.h"
 void notifyEdtCreate(ocrGuid_t guid, ocrGuid_t templateGuid,
                 u32 paramc, u64* paramv, u32 depc, ocrGuid_t *depv,
-                u16 properties, ocrGuid_t outputEvent) {
+                u16 properties, ocrGuid_t outputEvent, ocrGuid_t parent) {
 
 }
 
