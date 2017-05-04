@@ -71,8 +71,6 @@ u8 ocrEventCreateParams(ocrGuid_t *guid, ocrEventTypes_t eventType, u16 properti
     if(returnCode == 0)
         OCR_TOOL_TRACE(true, OCR_TRACE_TYPE_EVENT, OCR_ACTION_CREATE, traceEventCreate, *guid);
 
-//    notifyEventCreate(*guid, eventType, properties);
-
     RETURN_PROFILE(returnCode);
 
 }
@@ -397,8 +395,6 @@ u8 ocrEdtCreate(ocrGuid_t* edtGuidPtr, ocrGuid_t templateGuid,
     paramc = PD_MSG_FIELD_IO(paramc);
     depc = PD_MSG_FIELD_IO(depc);
 
-
-    notifyEdtCreate(*edtGuidPtr, templateGuid, paramc, paramv, depc, depv, properties, outputEvent ? *outputEvent : NULL_GUID, curEdt ? curEdt->guid : NULL_GUID);
 #ifndef EDT_DEPV_DELAYED
     // We still need to do that in case depc was EDT_PARAM_DEF
     // and the actual number of dependences was unknown then.
@@ -435,6 +431,7 @@ u8 ocrEdtCreate(ocrGuid_t* edtGuidPtr, ocrGuid_t templateGuid,
     if (!ocrGuidIsNull(PD_MSG_FIELD_I(parentLatch.guid))) {
         notifyAddDependence(*edtGuidPtr, PD_MSG_FIELD_I(parentLatch.guid), OCR_EVENT_LATCH_DECR_SLOT, DB_MODE_CONST);
     }
+
     RETURN_PROFILE(0);
 #undef PD_MSG
 #undef PD_TYPE
@@ -555,8 +552,6 @@ u8 ocrAddDependence(ocrGuid_t source, ocrGuid_t destination, u32 slot,
 #endif
     DPRINTF_COND_LVL(returnCode, DEBUG_LVL_WARN, DEBUG_LVL_INFO,
                      "EXIT ocrAddDependence(src="GUIDF", dest="GUIDF") -> %"PRIu32"\n", GUIDA(source), GUIDA(destination), returnCode);
-
-    notifyAddDependence(source, destination, slot, mode);
 
     RETURN_PROFILE(returnCode);
 }

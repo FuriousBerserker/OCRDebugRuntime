@@ -2190,6 +2190,7 @@ u8 hcPolicyDomainProcessMessage(ocrPolicyDomain_t *self, ocrPolicyMsg_t *msg, u8
             PD_MSG_FIELD_O(returnDetail) = returnCode;
         }
         ASSERT((returnCode == 0) || (returnCode == OCR_EGUIDEXISTS));
+        notifyEdtCreate(PD_MSG_FIELD_IO(guid.guid), PD_MSG_FIELD_I(templateGuid.guid), PD_MSG_FIELD_IO(paramc), PD_MSG_FIELD_I(paramv), PD_MSG_FIELD_IO(depc), NULL, properties, outputEvent->guid, PD_MSG_FIELD_I(currentEdt).guid);
 #ifndef EDT_DEPV_DELAYED
         if ((depv != NULL)) {
             ASSERT(returnCode == 0);
@@ -2973,6 +2974,7 @@ u8 hcPolicyDomainProcessMessage(ocrPolicyDomain_t *self, ocrPolicyMsg_t *msg, u8
 #undef PD_TYPE
         msg->type &= ~PD_MSG_REQUEST;
         msg->type |= PD_MSG_RESPONSE;
+        notifyAddDependence(src.guid, dest.guid, slot, mode);
         EXIT_PROFILE;
         break;
     }
