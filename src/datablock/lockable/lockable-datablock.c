@@ -31,6 +31,8 @@
 #include "ocr-statistics-callbacks.h"
 #endif
 
+#include "ocr-instrument.h"
+
 #define DEBUG_TYPE DATABLOCK
 
 #define DB_LOCKED_NONE 0
@@ -539,6 +541,8 @@ u8 lockableDestruct(ocrDataBlock_t *self) {
     PD_MSG_FIELD_I(properties) = 0;
     RESULT_PROPAGATE(pd->fcts.processMessage(pd, &msg, false));
 
+    //add this hook for race detection
+    notifyDbDestroy(self->guid);
 
 #ifdef OCR_ENABLE_STATISTICS
     // This needs to be done before GUID is freed.

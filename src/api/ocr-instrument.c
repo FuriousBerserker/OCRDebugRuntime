@@ -31,3 +31,13 @@ void notifyShutdown() {
 void notifyEdtStart(ocrGuid_t edtGuid, u32 paramc, u64* paramv, u32 depc, ocrEdtDep_t depv[], u64* dbSizev) {
 
 }
+
+void notifyDbRelease(ocrGuid_t edtGuid, ocrGuid_t dbGuid) {
+
+}
+
+void notifyDbDestroy(ocrGuid_t dbGuid) {
+
+}
+
+
