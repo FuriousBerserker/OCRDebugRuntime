@@ -41,6 +41,8 @@ void notifyDbRelease(ocrGuid_t edtGuid, ocrGuid_t dbGuid);
 
 void notifyDbDestroy(ocrGuid_t dbGuid);
 
+void notifyEventPropagate(ocrGuid_t eventGuid);
+
 #ifdef __cplusplus
 }
 #endif

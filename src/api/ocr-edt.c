@@ -118,6 +118,7 @@ u8 ocrEventSatisfySlot(ocrGuid_t eventGuid, ocrGuid_t dataGuid /*= INVALID_GUID*
 
     ocrTask_t * curEdt = NULL;
     getCurrentEnv(&pd, NULL, &curEdt, &msg);
+    notifyEventSatisfy(curEdt ? curEdt->guid : NULL_GUID, eventGuid, dataGuid, slot);
 #define PD_MSG (&msg)
 #define PD_TYPE PD_MSG_DEP_SATISFY
     msg.type = PD_MSG_DEP_SATISFY | PD_MSG_REQUEST;
@@ -145,7 +146,7 @@ u8 ocrEventSatisfySlot(ocrGuid_t eventGuid, ocrGuid_t dataGuid /*= INVALID_GUID*
     ocrGuid_t currentGuid;
     currentEdtUserGet(&currentGuid);
     _ocrAssert(currentGuid.guid != NULL_GUID.guid, "guid cannot be null", "", 0);
-    notifyEventSatisfy(currentGuid, eventGuid, dataGuid, slot);
+    //notifyEventSatisfy(currentGuid, eventGuid, dataGuid, slot);
 
     RETURN_PROFILE(returnCode);
 #undef PD_MSG

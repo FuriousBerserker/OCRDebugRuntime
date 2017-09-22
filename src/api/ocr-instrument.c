@@ -40,4 +40,8 @@ void notifyDbDestroy(ocrGuid_t dbGuid) {
 
 }
 
+void notifyEventPropagate(ocrGuid_t eventGuid) {
+
+}
+
 

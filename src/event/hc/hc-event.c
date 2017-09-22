@@ -19,6 +19,7 @@
 #include "utils/ocr-utils.h"
 #include "ocr-worker.h"
 #include "ocr-errors.h"
+#include "ocr-instrument.h"
 
 #if defined (ENABLE_RESILIENCY) && defined (ENABLE_CHECKPOINT_VERIFICATION)
 #include "policy-domain/hc/hc-policy.h"
@@ -441,6 +442,7 @@ u8 satisfyEventHcOnce(ocrEvent_t *base, ocrFatGuid_t db, u32 slot) {
 #endif
 
     if (waitersCount) {
+        notifyEventPropagate(base->guid);
         RESULT_PROPAGATE(commonSatisfyWaiters(pd, base, db, waitersCount, currentEdt, &msg, false));
     }
 
@@ -461,6 +463,7 @@ static u8 commonSatisfyEventHcPersist(ocrEvent_t *base, ocrFatGuid_t db, u32 slo
 #endif
     // Process waiters to be satisfied
     if(waitersCount) {
+        notifyEventPropagate(base->guid);
         ocrPolicyDomain_t *pd = NULL;
         ocrTask_t *curTask = NULL;
         PD_MSG_STACK(msg);
@@ -661,6 +664,7 @@ u8 satisfyEventHcLatch(ocrEvent_t *base, ocrFatGuid_t db, u32 slot) {
     event->base.waitersCount = STATE_CHECKED_IN; // Indicate that the event is satisfied
 
     if (waitersCount) {
+        notifyEventPropagate(base->guid);
         RESULT_PROPAGATE(commonSatisfyWaiters(pd, base, db, waitersCount, currentEdt, &msg, false));
     }
 
@@ -1897,6 +1901,8 @@ u8 satisfyEventHcChannel(ocrEvent_t *base, ocrFatGuid_t db, u32 slot) {
         currentEdt.metaDataPtr = curTask;
         DPRINTF(DEBUG_LVL_CHANNEL, "satisfyEventHcChannel satisfy edt with DB="GUIDF"\n",
                 GUIDA(db.guid));
+        printf("Currently we donot support channel event");
+        abort();
         return commonSatisfyRegNode(pd, &msg, base->guid, db, currentEdt, &regnode);
     } else {
         DPRINTF(DEBUG_LVL_CHANNEL, "satisfyEventHcChannel "GUIDF" satisfy enqueued curSize=%"PRIu32"\n",
