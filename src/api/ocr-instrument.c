@@ -44,4 +44,7 @@ void notifyEventPropagate(ocrGuid_t eventGuid) {
 
 }
 
+void notifyEdtTerminate(ocrGuid_t edtGuid) {
+
+}
 

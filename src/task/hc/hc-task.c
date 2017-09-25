@@ -1922,6 +1922,7 @@ u8 taskExecute(ocrTask_t* base) {
         }
         notifyEdtStart(base->guid, paramc, paramv, depc, depv, dbSizev);
         retGuid = base->funcPtr(paramc, paramv, depc, depv);
+        notifyEdtTerminate(base->guid);
         
         EXIT_PROFILE;
 #endif /* ENABLE_POLICY_DOMAIN_HC_DIST */
