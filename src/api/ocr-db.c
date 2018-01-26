@@ -267,6 +267,7 @@ u8 ocrDbRelease(ocrGuid_t db) {
 
     DPRINTF_COND_LVL(returnCode, DEBUG_LVL_WARN, DEBUG_LVL_INFO,
                      "EXIT ocrDbRelease(guid="GUIDF") -> %"PRIu32"\n", GUIDA(db), returnCode);
+    notifyDbRelease(task->guid, db);
     RETURN_PROFILE(returnCode);
 }
 

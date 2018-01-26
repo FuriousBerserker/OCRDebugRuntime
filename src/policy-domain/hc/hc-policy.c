@@ -1912,7 +1912,7 @@ u8 hcPolicyDomainProcessMessage(ocrPolicyDomain_t *self, ocrPolicyMsg_t *msg, u8
         DPRINTF(DEBUG_LVL_INFO, "DB guid "GUIDF" of size %"PRIu64" released by EDT "GUIDF"\n",
                 GUIDA(db->guid), db->size, GUIDA(edtGuid));
         OCR_TOOL_TRACE(false, OCR_TRACE_TYPE_EDT, OCR_ACTION_DATA_RELEASE, traceTaskDataRelease, edtGuid, db->guid, db->size);
-        notifyDbRelease(PD_MSG_FIELD_I(edt.guid), PD_MSG_FIELD_IO(guid.guid));
+        //notifyDbRelease(PD_MSG_FIELD_I(edt.guid), PD_MSG_FIELD_IO(guid.guid));
 #undef PD_MSG
 #undef PD_TYPE
         msg->type &= ~PD_MSG_REQUEST;
