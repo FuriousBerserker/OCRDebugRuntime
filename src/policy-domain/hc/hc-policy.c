@@ -2736,6 +2736,7 @@ u8 hcPolicyDomainProcessMessage(ocrPolicyDomain_t *self, ocrPolicyMsg_t *msg, u8
         ocrFatGuid_t dest = PD_MSG_FIELD_I(dest);
         ocrDbAccessMode_t mode = (PD_MSG_FIELD_IO(properties) & DB_ACCESS_MODE_MASK); //lower bits is the mode //BUG 550: not pretty
         u32 slot = PD_MSG_FIELD_I(slot);
+        notifyAddDependence(src.guid, dest.guid, slot, mode);
 #ifdef ENABLE_EXTENSION_CHANNEL_EVT
 #ifdef XP_CHANNEL_EVT_NONFIFO
             bool sync = false;
@@ -2974,7 +2975,7 @@ u8 hcPolicyDomainProcessMessage(ocrPolicyDomain_t *self, ocrPolicyMsg_t *msg, u8
 #undef PD_TYPE
         msg->type &= ~PD_MSG_REQUEST;
         msg->type |= PD_MSG_RESPONSE;
-        notifyAddDependence(src.guid, dest.guid, slot, mode);
+        //notifyAddDependence(src.guid, dest.guid, slot, mode);
         EXIT_PROFILE;
         break;
     }
